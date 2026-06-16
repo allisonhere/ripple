@@ -43,5 +43,22 @@
 // jumps with ctrl, home/end, page up/down, and shift selection variants) are
 // fixed.
 //
+// # Vim mode
+//
+// Modal (vim-style) editing is available as an opt-in via [Model.SetInputMode]
+// with [ModeVim]; the default [ModePlain] is conventional insert-only editing,
+// so existing callers are unaffected. Vim mode adds Normal, Insert, Visual, and
+// Visual-line sub-modes with the common Phase-1 grammar — motions (h/j/k/l,
+// w/b/e, 0/^/$, gg/G, numeric counts), insert entry (i/a/o/O/I/A), edits
+// (x/dd/yy/p/P, the d/c/y operators with motions like dw/cw/d$), visual v/V, and
+// u / ctrl+r undo-redo. [Model.Mode] returns a label ("NORMAL", "INSERT", …) for
+// a status indicator, and [Model.CommandLine] returns the ":" line being typed.
+//
+// Because ripple is content-agnostic, the ":" command line surfaces host intents
+// rather than acting itself: ":w"/":wq"/":x" emit a [SubmitMsg] and ":q" (or a
+// second Esc from Normal mode) emits a [CancelMsg], both delivered as ordinary
+// messages through the command [Model.Update] returns. The host decides what
+// "submit" and "cancel" mean. Render a vim block cursor with [Options.CursorRune].
+//
 // [Bubble Tea]: https://github.com/charmbracelet/bubbletea
 package ripple
