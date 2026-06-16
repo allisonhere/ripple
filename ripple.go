@@ -35,6 +35,13 @@ type Options struct {
 	// Cursor is drawn at the caret cell (e.g. a styled space or block). Empty
 	// defaults to a single space; nothing is drawn while the editor is blurred.
 	Cursor string
+	// CursorRune, when non-nil, styles the character under the caret in place —
+	// e.g. reverse video for a block cursor that still shows its glyph — instead
+	// of overwriting that cell with Cursor. It is called with the character at
+	// the caret, or a space at end-of-line or on an empty line. This is what a
+	// vim Normal-mode block cursor wants; an insert/bar cursor can leave it nil
+	// and use Cursor. Ignored while blurred.
+	CursorRune func(string) string
 	// Selected wraps the selected run for styling (e.g. reverse video). Nil
 	// leaves the selection unstyled.
 	Selected func(string) string
@@ -62,6 +69,9 @@ type Model struct {
 	placeholder string
 	clipboard   Clipboard
 	keys        KeyMap
+
+	inputMode InputMode
+	vim       vimState
 }
 
 // KeyMap holds the editor's editing-command bindings. Text input and cursor
@@ -232,6 +242,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.inputMode == ModeVim {
+		return m.handleVim(msg)
+	}
+	return m.handlePlainKey(msg)
+}
+
+// handlePlainKey is the conventional insert-only key handling (also used by vim
+// Insert mode). Editing commands from the KeyMap take precedence; everything
+// else is text input and fixed cursor movement.
+func (m Model) handlePlainKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	// A zero-value Model (no New) has an empty KeyMap; fall back to the defaults
 	// so the command keys still work without requiring SetKeyMap.
@@ -396,13 +416,13 @@ func (m Model) View(opts Options) string {
 		if lineIdx == cursorRow {
 			lineCursor = cursor
 		}
-		out = append(out, m.renderVisualLine(vl, lineCursor, opts.Selected))
+		out = append(out, m.renderVisualLine(vl, lineCursor, opts.Selected, opts.CursorRune))
 	}
 	return strings.Join(out, "\n")
 }
 
-func (m Model) renderVisualLine(vl visualLine, cursor string, selected func(string) string) string {
-	selStart, selEnd, hasSelection := m.selectionRange()
+func (m Model) renderVisualLine(vl visualLine, cursor string, selected, cursorRune func(string) string) string {
+	selStart, selEnd, hasSelection := m.selectionForRender()
 	var out strings.Builder
 	flush := func(buf *[]rune, mark bool) {
 		if len(*buf) == 0 {
@@ -420,7 +440,15 @@ func (m Model) renderVisualLine(vl visualLine, cursor string, selected func(stri
 	for idx := vl.start; idx <= vl.end; idx++ {
 		if cursor != "" && idx == m.cursor {
 			flush(&buf, bufSelected)
-			out.WriteString(cursor)
+			if cursorRune != nil {
+				ch := " "
+				if idx < vl.end && m.text[idx] != '\n' {
+					ch = string(m.text[idx])
+				}
+				out.WriteString(cursorRune(ch))
+			} else {
+				out.WriteString(cursor)
+			}
 			if idx < vl.end {
 				continue
 			}

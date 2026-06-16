@@ -86,6 +86,49 @@ each line to the configured width instead.
 Editing commands are configurable via `KeyMap` and `SetKeyMap`. Text input and
 cursor movement are fixed.
 
+## Vim mode
+
+Modal (vim-style) editing is opt-in — the default is conventional insert-only
+editing, so existing callers are unaffected:
+
+```go
+ed.SetInputMode(ripple.ModeVim) // ModePlain (default) restores insert-only
+```
+
+It adds Normal, Insert, Visual, Visual-line, and a `:` command line. `Mode()`
+returns the active sub-mode label (`"NORMAL"`, `"INSERT"`, …) for a status
+indicator, and `CommandLine()` returns the `:` text being typed.
+
+| Group | Keys |
+|-------|------|
+| Modes | `i a o O I A` enter Insert; `v` / `V` visual; `:` command; `Esc` leaves |
+| Motions | `h j k l`, `w b e`, `0 ^ $`, `gg G`, counts (`3j`); arrows also move |
+| Edits | `x`, `dd`, `yy`, `p`/`P`, `D`, `C`, `s`; `d`/`c`/`y` + motion (`dw`, `cw`, `d$`, …) |
+| History | `u` undo, `ctrl+r` redo |
+
+**Host intents.** The editor stays content-agnostic: `:w` / `:wq` / `:x` emit a
+`ripple.SubmitMsg` and `:q` (or a second `Esc` from Normal mode) emits a
+`ripple.CancelMsg`, both delivered as ordinary messages via the command `Update`
+returns. The host decides what "submit" and "cancel" mean:
+
+```go
+case ripple.SubmitMsg:
+	return a, a.send()   // e.g. send the message
+case ripple.CancelMsg:
+	return a, a.close()  // e.g. confirm-and-close
+```
+
+**Clipboard.** In vim mode `y`/`d`/`c`/`x` mirror to the wired clipboard and
+`p`/`P` read it (vim's `unnamedplus`), so yank/paste and `ctrl+c`/`ctrl+v` share
+one buffer; the in-editor register is the fallback when no clipboard is wired.
+
+**Cursor.** Set `Options.CursorRune` to style the character under the caret in
+place (a block cursor that still shows its glyph) for Normal/Visual mode, while
+Insert can keep a bar via `Options.Cursor`.
+
+A runnable harness lives in `cmd/rippletest` (`go run ./cmd/rippletest`; `F2`
+toggles vim, `Ctrl+Q` quits).
+
 ## License
 
 MIT (see repository).
