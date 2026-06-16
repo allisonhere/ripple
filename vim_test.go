@@ -437,3 +437,33 @@ func TestVimLinewiseClipboardRoundTrip(t *testing.T) {
 		t.Fatalf("linewise p across clipboard: %q", got)
 	}
 }
+
+func TestVimStartInsert(t *testing.T) {
+	e := vimEditor("hi")
+	if e.Mode() != "NORMAL" {
+		t.Fatalf("vim editor should default to NORMAL, got %q", e.Mode())
+	}
+	e.StartInsert()
+	if e.Mode() != "INSERT" {
+		t.Fatalf("after StartInsert, mode = %q, want INSERT", e.Mode())
+	}
+	// In plain mode it's a no-op.
+	p := New()
+	p.StartInsert()
+	if p.Mode() != "" {
+		t.Fatalf("StartInsert in plain mode should be a no-op, got %q", p.Mode())
+	}
+}
+
+func TestVimCtrlHomeEnd(t *testing.T) {
+	e := vimEditor("one\ntwo\nthree")
+	apply(&e, tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	// Normal mode rests the caret on the last character, not past it.
+	if e.cursor != len(e.text)-1 {
+		t.Fatalf("ctrl+end cursor = %d, want %d", e.cursor, len(e.text)-1)
+	}
+	apply(&e, tea.KeyMsg{Type: tea.KeyCtrlHome})
+	if e.cursor != 0 {
+		t.Fatalf("ctrl+home cursor = %d, want 0", e.cursor)
+	}
+}

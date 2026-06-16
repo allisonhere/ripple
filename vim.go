@@ -69,6 +69,18 @@ func (m *Model) SetInputMode(mode InputMode) {
 // InputMode reports the current editing mode.
 func (m Model) InputMode() InputMode { return m.inputMode }
 
+// StartInsert puts a vim-mode editor into Insert mode (a no-op in plain mode).
+// Hosts that focus the editor for immediate typing — e.g. a compose box where
+// the user expects to type right away and press Esc to reach Normal — call this
+// after enabling vim so the editor doesn't sit in Normal mode swallowing the
+// first keystrokes (and the first Esc).
+func (m *Model) StartInsert() {
+	if m.inputMode == ModeVim {
+		m.vim.mode = vimInsert
+		m.vim.pending, m.vim.count, m.vim.gPending = 0, 0, false
+	}
+}
+
 // Mode returns a short label for the active vim sub-mode — "NORMAL", "INSERT",
 // "VISUAL", "V-LINE", or "COMMAND" — for the host to render as a status
 // indicator. It returns "" in plain mode, where there is no mode to show.
@@ -222,6 +234,10 @@ func (m Model) vimNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.moveLineBoundary(false, selecting)
 	case tea.KeyEnd:
 		m.moveLineBoundary(true, selecting)
+	case tea.KeyCtrlHome:
+		m.moveTo(0, selecting)
+	case tea.KeyCtrlEnd:
+		m.moveTo(len(m.text), selecting)
 	case tea.KeyPgUp:
 		m.moveVertical(-m.height, selecting)
 	case tea.KeyPgDown:
