@@ -194,6 +194,42 @@ func (m *Model) SetSize(width, height int) {
 	m.ensureCursorVisible()
 }
 
+// SetWidth changes only the visible width, preserving the current height. A
+// zero-value editor falls back to the default height, so textarea-compatible
+// hosts can call SetWidth before SetHeight without temporarily pinning the
+// viewport to one row.
+func (m *Model) SetWidth(width int) {
+	if m.height < 1 {
+		m.height = 24
+	}
+	m.SetSize(width, m.height)
+}
+
+// SetHeight changes only the visible height, preserving the current width. A
+// zero-value editor falls back to the default width.
+func (m *Model) SetHeight(height int) {
+	if m.width < 1 {
+		m.width = 80
+	}
+	m.SetSize(m.width, height)
+}
+
+// Size returns the visible editor dimensions, applying the same defaults as the
+// zero-value editor when either dimension has not been explicitly set.
+func (m Model) Size() (width, height int) {
+	if m.width < 1 {
+		width = 80
+	} else {
+		width = m.width
+	}
+	if m.height < 1 {
+		height = 24
+	} else {
+		height = m.height
+	}
+	return width, height
+}
+
 // CursorIndex returns the caret position as a rune offset into Value.
 func (m Model) CursorIndex() int {
 	return m.cursor

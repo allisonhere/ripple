@@ -46,6 +46,11 @@ func (a app) View() string {
 
 `Update` returns the updated model and a command, like any Bubble Tea component.
 
+If your host has textarea-style separate sizing hooks, use `SetWidth` and
+`SetHeight`; they preserve the other dimension and avoid temporary one-row
+viewport jumps while a compose surface is being laid out. Prefer `SetSize` when
+both dimensions are known together.
+
 ## Clipboard
 
 Copy/cut/paste emit their clipboard side effect as a `tea.Cmd`, so it travels

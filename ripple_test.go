@@ -308,6 +308,45 @@ func TestViewportStableAtDocumentEdges(t *testing.T) {
 	}
 }
 
+func TestSplitSizingMatchesAtomicSetSize(t *testing.T) {
+	value := strings.Join([]string{
+		"one", "two", "three", "four", "five", "six", "seven", "eight",
+		"nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+	}, "\n")
+
+	atomic := New()
+	atomic.SetValue(value)
+	apply(&atomic, tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	atomic.SetSize(12, 5)
+
+	split := New()
+	split.SetValue(value)
+	apply(&split, tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	split.SetWidth(12)
+	split.SetHeight(5)
+
+	if got, want := split.ViewportTop(), atomic.ViewportTop(); got != want {
+		t.Fatalf("split sizing viewport = %d, want atomic SetSize viewport %d", got, want)
+	}
+	if got, want := split.View(Options{Cursor: "|"}), atomic.View(Options{Cursor: "|"}); got != want {
+		t.Fatalf("split sizing view differs from atomic SetSize\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestSplitSizingUsesDefaultsForZeroValueEditor(t *testing.T) {
+	var e Model
+	e.SetWidth(40)
+	if width, height := e.Size(); width != 40 || height != 24 {
+		t.Fatalf("after SetWidth size = %dx%d, want 40x24", width, height)
+	}
+
+	var h Model
+	h.SetHeight(8)
+	if width, height := h.Size(); width != 80 || height != 8 {
+		t.Fatalf("after SetHeight size = %dx%d, want 80x8", width, height)
+	}
+}
+
 func TestViewRendersExactHeight(t *testing.T) {
 	cases := map[string]string{
 		"empty": "",
