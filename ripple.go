@@ -47,6 +47,21 @@ type Options struct {
 	Selected func(string) string
 	// Placeholder styles the placeholder text shown while the document is empty.
 	Placeholder func(string) string
+	// StyleKey classifies the rune at a document offset (e.g. "key", "string",
+	// "comment" for syntax highlighting) so consecutive same-keyed runes are
+	// batched into one Style call, the same way Selected already receives a
+	// whole run rather than one rune at a time. Return "" for runes that need
+	// no styling. Nil disables highlighting entirely (the common case, and the
+	// only behavior older callers ever saw).
+	StyleKey func(offset int) string
+	// Style renders one run of text sharing the same StyleKey. It runs before
+	// Selected/CursorRune, so a selection or cursor drawn over highlighted
+	// text layers on top instead of clobbering it: View splits runs on both a
+	// StyleKey change and a selection-state change, so every Style/Selected
+	// call always wraps a self-contained, uniformly-styled fragment — safe to
+	// use a full SGR reset per call, the way lipgloss.Style.Render already
+	// does. Required when StyleKey is set; ignored otherwise.
+	Style func(key string, text string) string
 }
 
 // Model is a multi-line text editor: create one with New, drive it with Update,
@@ -452,19 +467,22 @@ func (m Model) View(opts Options) string {
 		if lineIdx == cursorRow {
 			lineCursor = cursor
 		}
-		out = append(out, m.renderVisualLine(vl, lineCursor, opts.Selected, opts.CursorRune))
+		out = append(out, m.renderVisualLine(vl, lineCursor, opts.Selected, opts.CursorRune, opts.StyleKey, opts.Style))
 	}
 	return strings.Join(out, "\n")
 }
 
-func (m Model) renderVisualLine(vl visualLine, cursor string, selected, cursorRune func(string) string) string {
+func (m Model) renderVisualLine(vl visualLine, cursor string, selected, cursorRune func(string) string, styleKey func(int) string, style func(string, string) string) string {
 	selStart, selEnd, hasSelection := m.selectionForRender()
 	var out strings.Builder
-	flush := func(buf *[]rune, mark bool) {
+	flush := func(buf *[]rune, mark bool, key string) {
 		if len(*buf) == 0 {
 			return
 		}
 		text := string(*buf)
+		if style != nil {
+			text = style(key, text)
+		}
 		if mark && selected != nil {
 			text = selected(text)
 		}
@@ -473,9 +491,10 @@ func (m Model) renderVisualLine(vl visualLine, cursor string, selected, cursorRu
 	}
 	var buf []rune
 	bufSelected := false
+	var bufKey string
 	for idx := vl.start; idx <= vl.end; idx++ {
 		if cursor != "" && idx == m.cursor {
-			flush(&buf, bufSelected)
+			flush(&buf, bufSelected, bufKey)
 			if cursorRune != nil {
 				ch := " "
 				if idx < vl.end && m.text[idx] != '\n' {
@@ -493,13 +512,18 @@ func (m Model) renderVisualLine(vl visualLine, cursor string, selected, cursorRu
 			break
 		}
 		marked := hasSelection && idx >= selStart && idx < selEnd
-		if len(buf) > 0 && marked != bufSelected {
-			flush(&buf, bufSelected)
+		var key string
+		if styleKey != nil {
+			key = styleKey(idx)
+		}
+		if len(buf) > 0 && (marked != bufSelected || key != bufKey) {
+			flush(&buf, bufSelected, bufKey)
 		}
 		bufSelected = marked
+		bufKey = key
 		buf = append(buf, m.text[idx])
 	}
-	flush(&buf, bufSelected)
+	flush(&buf, bufSelected, bufKey)
 	return out.String()
 }
 

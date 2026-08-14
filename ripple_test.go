@@ -138,6 +138,105 @@ func TestViewMarksSelectedText(t *testing.T) {
 	}
 }
 
+func TestViewAppliesStyleKeyPerRun(t *testing.T) {
+	var e Model
+	e.SetSize(20, 1)
+	e.SetValue("key: value")
+
+	view := e.View(Options{
+		StyleKey: func(offset int) string {
+			if offset < len("key:") {
+				return "key"
+			}
+			return ""
+		},
+		Style: func(key, text string) string {
+			if key == "key" {
+				return "<" + text + ">"
+			}
+			return text
+		},
+	})
+
+	if !strings.Contains(view, "<key:> value") {
+		t.Fatalf("expected the key run styled and the value run plain, got %q", view)
+	}
+}
+
+func TestViewSplitsStyleRunsOnKeyChange(t *testing.T) {
+	var e Model
+	e.SetSize(20, 1)
+	e.SetValue("aabbcc")
+
+	var calls []string
+	e.View(Options{
+		StyleKey: func(offset int) string {
+			return string(rune('A' + offset/2)) // "aa"->A, "bb"->B, "cc"->C
+		},
+		Style: func(key, text string) string {
+			calls = append(calls, key+":"+text)
+			return text
+		},
+	})
+
+	want := []string{"A:aa", "B:bb", "C:cc"}
+	if len(calls) != len(want) {
+		t.Fatalf("Style calls = %v, want %v", calls, want)
+	}
+	for i := range want {
+		if calls[i] != want[i] {
+			t.Fatalf("Style calls = %v, want %v", calls, want)
+		}
+	}
+}
+
+func TestViewLayersSelectedOverStyledText(t *testing.T) {
+	var e Model
+	e.SetSize(20, 2)
+	e.SetValue("keyword rest")
+	apply(&e, tea.KeyMsg{Type: tea.KeyCtrlHome})
+	for range len("keyword") {
+		apply(&e, tea.KeyMsg{Type: tea.KeyShiftRight})
+	}
+
+	view := e.View(Options{
+		Cursor: "|",
+		StyleKey: func(offset int) string {
+			if offset < len("keyword") {
+				return "kw"
+			}
+			return ""
+		},
+		Style: func(key, text string) string {
+			if key == "kw" {
+				return "*" + text + "*"
+			}
+			return text
+		},
+		Selected: func(s string) string {
+			return "[" + s + "]"
+		},
+	})
+
+	if !strings.Contains(view, "[*keyword*]") {
+		t.Fatalf("expected the selected+styled run to carry both wraps, got %q", view)
+	}
+	if strings.Contains(view, "*rest*") || strings.Contains(view, "[rest]") {
+		t.Fatalf("expected the trailing unselected, unstyled text to carry neither wrap, got %q", view)
+	}
+}
+
+func TestViewNilStyleKeyLeavesTextUnstyled(t *testing.T) {
+	var e Model
+	e.SetSize(20, 1)
+	e.SetValue("plain text")
+
+	view := e.View(Options{Cursor: "|"})
+	if !strings.Contains(ansi.Strip(view), "plain text") {
+		t.Fatalf("expected unstyled plain text with nil StyleKey, got %q", view)
+	}
+}
+
 func TestViewDoesNotExceedConfiguredWidth(t *testing.T) {
 	var e Model
 	e.SetSize(5, 2)

@@ -134,6 +134,41 @@ Insert can keep a bar via `Options.Cursor`.
 A runnable harness lives in `cmd/rippletest` (`go run ./cmd/rippletest`; `F2`
 toggles vim, `Ctrl+Q` quits).
 
+## Syntax highlighting
+
+ripple doesn't know about any particular language, but a host that does can
+color the document with `Options.StyleKey` and `Options.Style`. `StyleKey`
+classifies the rune at a document offset — token kind, color name, whatever the
+host's tokenizer produces — and `View` batches consecutive same-keyed runes
+into a single `Style` call, exactly the way `Options.Selected` already receives
+a whole run instead of one rune at a time:
+
+```go
+ed.View(ripple.Options{
+	Cursor: "█",
+	StyleKey: func(offset int) string {
+		return tokenKindAt(doc, offset) // e.g. "key", "string", "comment", ""
+	},
+	Style: func(key, text string) string {
+		switch key {
+		case "key":
+			return keyStyle.Render(text)
+		case "string":
+			return stringStyle.Render(text)
+		case "comment":
+			return commentStyle.Render(text)
+		default:
+			return text
+		}
+	},
+})
+```
+
+Runs also split wherever the selection state changes, so a `Style` call always
+wraps a self-contained, uniformly-styled fragment — a full SGR reset per call
+(what `lipgloss.Style.Render` already does) is safe and won't clobber a
+selection or cursor layered on top of highlighted text.
+
 ## License
 
 MIT (see repository).

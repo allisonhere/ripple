@@ -60,5 +60,18 @@
 // messages through the command [Model.Update] returns. The host decides what
 // "submit" and "cancel" mean. Render a vim block cursor with [Options.CursorRune].
 //
+// # Syntax highlighting
+//
+// ripple doesn't know about any particular language, but a host that does can
+// color the document by setting [Options.StyleKey] and [Options.Style].
+// StyleKey classifies the rune at a document offset (e.g. by token kind);
+// [Model.View] batches consecutive runes sharing the same key into one run and
+// calls Style once per run, the same way [Options.Selected] already receives a
+// whole run rather than one rune at a time. Because runs also split wherever
+// the selection state changes, every Style/Selected call always wraps a
+// self-contained, uniformly-styled fragment — a full SGR reset per call (what
+// lipgloss.Style.Render already does) is safe and won't clobber a selection or
+// cursor layered on top.
+//
 // [Bubble Tea]: https://github.com/charmbracelet/bubbletea
 package ripple
