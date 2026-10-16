@@ -776,3 +776,49 @@ func TestWrappedVerticalMovementAndViewport(t *testing.T) {
 		t.Fatalf("view should render cursor marker, got %q", view)
 	}
 }
+
+func TestReplaceRangeCaretHandling(t *testing.T) {
+	// "I recieve it": the typo occupies runes [2, 9).
+	cases := []struct {
+		name       string
+		caret      int
+		repl       string
+		want       string
+		wantCursor int
+	}{
+		{"caret after the range shifts by the length change", 12, "the", "I the it", 8},
+		{"caret before the range stays", 1, "receive", "I receive it", 1},
+		{"caret inside the range moves to the end of the replacement", 5, "xy", "I xy it", 4},
+		{"same length keeps a later caret", 12, "receive", "I receive it", 12},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var e Model
+			e.SetValue("I recieve it")
+			e.cursor = tc.caret
+			e.ReplaceRange(2, 9, tc.repl)
+			if got := e.Value(); got != tc.want {
+				t.Fatalf("value = %q; want %q", got, tc.want)
+			}
+			if e.CursorIndex() != tc.wantCursor {
+				t.Fatalf("cursor = %d; want %d", e.CursorIndex(), tc.wantCursor)
+			}
+		})
+	}
+}
+
+func TestReplaceRangeIsOneUndoStepAndClamps(t *testing.T) {
+	var e Model
+	e.SetValue("teh cat")
+	e.ReplaceRange(0, 3, "the")
+	if e.Value() != "the cat" {
+		t.Fatalf("value = %q", e.Value())
+	}
+	if !e.Undo() || e.Value() != "teh cat" {
+		t.Fatalf("one Undo should restore the original, got %q", e.Value())
+	}
+	e.ReplaceRange(5, 999, "!")
+	if got := e.Value(); got != "teh c!" {
+		t.Fatalf("out-of-range end should clamp, got %q", got)
+	}
+}

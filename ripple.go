@@ -146,6 +146,38 @@ func (m *Model) InsertString(s string) {
 	m.insertRunes(s)
 }
 
+// ReplaceRange replaces the runes in [start, end) with s as a single undo
+// unit, for hosts that edit a span they found themselves (a spelling fix, a
+// completion). Offsets are rune offsets into Value and are clamped to the
+// document. The caret keeps its place in the surrounding text: before the
+// range it stays put, after it it shifts by the length change, and inside it
+// it moves to the end of the replacement. Any selection is cleared.
+func (m *Model) ReplaceRange(start, end int, s string) {
+	start = clampInt(start, 0, len(m.text))
+	end = clampInt(end, start, len(m.text))
+	r := []rune(sanitizeInput(s))
+	m.pushUndo(kindBoundary)
+	next := make([]rune, 0, len(m.text)-(end-start)+len(r))
+	next = append(next, m.text[:start]...)
+	next = append(next, r...)
+	next = append(next, m.text[end:]...)
+	switch {
+	case m.cursor >= end:
+		m.cursor += len(r) - (end - start)
+	case m.cursor > start:
+		m.cursor = start + len(r)
+	}
+	m.text = next
+	m.selAnchor = -1
+	m.goalCol = -1
+	m.clamp()
+	m.ensureCursorVisible()
+}
+
+func clampInt(v, lo, hi int) int {
+	return max(lo, min(v, hi))
+}
+
 func (m *Model) insertRunes(s string) {
 	m.deleteSelection()
 	r := []rune(sanitizeInput(s))
