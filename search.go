@@ -662,14 +662,16 @@ func (m Model) searchBar(width int, opts Options, rows int) []string {
 		}
 		return label + " " + glyphKey
 	}
-	var toggles, replaceCell, allCell string
+	var toggles, caseCell, regexCell, replaceCell, allCell string
 	var togglesW, replaceW, allW int
 	replaceOK := s.err == "" && s.replacementErr == ""
 	build := func() {
-		caseCell, caseW := toggle(SearchFieldCase, !s.ignoreCase, keyed("Aa", "⌥C", "Alt+C"))
+		var caseW int
+		caseCell, caseW = toggle(SearchFieldCase, !s.ignoreCase, keyed("Aa", "⌥C", "Alt+C"))
 		toggles, togglesW = caseCell, caseW
 		if s.allowed {
-			regexCell, regexW := toggle(SearchFieldRegex, s.regex, keyed(".*", "⌥R", "Alt+R"))
+			var regexW int
+			regexCell, regexW = toggle(SearchFieldRegex, s.regex, keyed(".*", "⌥R", "Alt+R"))
 			toggles += text(" ") + regexCell
 			togglesW += 1 + regexW
 		}
@@ -711,8 +713,37 @@ func (m Model) searchBar(width int, opts Options, rows int) []string {
 	}
 	findCluster := text(" ") + statusCell(status) + text(strings.Repeat(" ", slotW()-lipgloss.Width(status)+1)) + toggles
 	withCluster := text(" ") + replaceCell + text(strings.Repeat(" ", slotW()-replaceW+1)) + allCell
-	if s.replacementErr != "" && s.field != SearchFieldReplace && s.field != SearchFieldAll {
-		withCluster = text(" ") + errorStyle(ansi.Truncate("Invalid replacement: "+s.replacementErr, clusterW()-1, "…"))
+	replacementErr := func(room int) string {
+		return errorStyle(ansi.Truncate("Invalid replacement: "+s.replacementErr, max(1, room), "…"))
+	}
+	showReplacementErr := s.replacementErr != "" && s.field != SearchFieldReplace && s.field != SearchFieldAll
+	if showReplacementErr {
+		withCluster = text(" ") + replacementErr(clusterW()-1)
+	}
+
+	// Too narrow for the whole cluster even with a minimal input: each row keeps
+	// one item — its focused control, so Tab never lands somewhere invisible,
+	// or else its most useful one (the count, or Replace).
+	if width-2-labelW-clusterW() < 4 {
+		room := max(1, width-2-labelW-1-4)
+		findItem := statusCell(ansi.Truncate(countStatus(true), room, "…"))
+		switch s.field {
+		case SearchFieldCase:
+			findItem = caseCell
+		case SearchFieldRegex:
+			findItem = regexCell
+		}
+		withItem := replaceCell
+		switch {
+		case s.field == SearchFieldAll:
+			withItem = allCell
+		case showReplacementErr:
+			withItem = replacementErr(room)
+		}
+		itemW := max(lipgloss.Width(findItem), lipgloss.Width(withItem))
+		inputW = max(1, width-2-labelW-1-itemW)
+		findCluster = text(" ") + findItem
+		withCluster = text(" ") + withItem
 	}
 
 	renderInput := func(input textinput.Model, focused bool) string {

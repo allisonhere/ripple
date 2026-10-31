@@ -624,3 +624,36 @@ func TestSearchBarShowsKeysOnControls(t *testing.T) {
 		t.Fatalf("plain keys must be ASCII: %q", plain)
 	}
 }
+
+// Tab must never land on a control the bar has clipped away.
+func TestSearchBarKeepsFocusedControlVisibleWhenNarrow(t *testing.T) {
+	labels := map[int]string{SearchFieldCase: "Aa", SearchFieldRegex: ".*", SearchFieldReplace: "Replace", SearchFieldAll: "All"}
+	pill := func(label string, focused, on, toggle bool) string { return "(" + label + ")" }
+	for _, opts := range []Options{{}, {SearchCell: pill, SearchShowKeys: true}} {
+		for _, width := range []int{16, 22, 30, 40} {
+			e := searchEditor("cat cat", "cat")
+			e.SetRegexSearchEnabled(true)
+			e.OpenReplace()
+			e.SetReplacement("dog")
+			for _, field := range e.searchFields() {
+				e.search.field = field
+				rows := e.SearchBarView(width, opts)
+				find, with := ansi.Strip(rows[0]), ansi.Strip(rows[1])
+				if ansi.StringWidth(find) != width || ansi.StringWidth(with) != width {
+					t.Fatalf("width %d field %d: rows overflow: %q / %q", width, field, find, with)
+				}
+				label, ok := labels[field]
+				if !ok {
+					continue
+				}
+				row := find
+				if field == SearchFieldReplace || field == SearchFieldAll {
+					row = with
+				}
+				if !strings.Contains(row, label) {
+					t.Fatalf("width %d: focused %q is clipped: %q / %q", width, label, find, with)
+				}
+			}
+		}
+	}
+}
