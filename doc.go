@@ -47,11 +47,14 @@
 //
 // Ctrl+F opens the built-in Find bar; Ctrl+R inside it expands replacement
 // controls. Enter/F3 advances and Shift+F3 goes backward. Tab cycles controls,
-// Esc closes. Hosts should route keys to the editor while [Model.SearchActive]
+// Esc closes. Alt+Enter replaces all while Replace is shown, Alt+C toggles match
+// case, and Alt+R toggles regex, so no control needs Tabbing onto. Hosts should route keys to the editor while [Model.SearchActive]
 // is true. [Model.SetRegexSearchEnabled] exposes an advanced regex toggle;
 // literal matching remains the default. [Model.ReplaceAll] is one undo step.
 // [Model.Search] exposes results as rune offsets. Search appearance is provided
-// by Options.SearchMatch, SearchCurrent, SearchControl, and SearchError.
+// by Options.SearchMatch, SearchCurrent, SearchControl, SearchError, SearchText,
+// SearchMuted, SearchRail, and SearchInput. [Model.SetSearchBarExternal] lets a
+// host draw the bar itself with [Model.SearchBarView].
 // Vim also supports /, ?, n, and N; :s substitution is not implemented.
 //
 // # Vim mode

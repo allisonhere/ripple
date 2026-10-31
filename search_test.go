@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -414,5 +415,212 @@ func TestRegexReplacementErrorRefreshesWithPatternAndMode(t *testing.T) {
 	e.SetSearchRegex(false)
 	if e.Search().ReplacementError != "" || !e.ReplaceCurrent() || e.Value() != "$1" {
 		t.Fatal("literal replacement must preserve dollars")
+	}
+}
+
+// fieldStart returns the display column where the input text after label begins.
+func fieldStart(row, label string) int {
+	return ansi.StringWidth(row[:strings.Index(row, label)]) + 6
+}
+
+func TestSearchBarGridIsStable(t *testing.T) {
+	for _, width := range []int{40, 60, 100} {
+		e := searchEditor("cat cat dog", "cat")
+		e.SetRegexSearchEnabled(true)
+		e.OpenReplace()
+		rows := e.SearchBarView(width, Options{})
+		if len(rows) != 2 {
+			t.Fatalf("width %d: want Find and With rows, got %d", width, len(rows))
+		}
+		find, with := ansi.Strip(rows[0]), ansi.Strip(rows[1])
+		for _, r := range []string{find, with} {
+			if ansi.StringWidth(r) != width {
+				t.Fatalf("width %d: row is %d cells: %q", width, ansi.StringWidth(r), r)
+			}
+		}
+		// Both inputs end where the shared control cluster begins.
+		if strings.Index(find, " 1 of 2") < 0 && width >= 60 {
+			t.Fatalf("width %d: status missing: %q", width, find)
+		}
+		toggleCol := ansi.StringWidth(find[:strings.Index(find, "Aa")])
+		for _, query := range []string{"dog", "zzz", "c"} {
+			e.SetSearchQuery(query)
+			row := ansi.Strip(e.SearchBarView(width, Options{})[0])
+			if got := ansi.StringWidth(row[:strings.Index(row, "Aa")]); got != toggleCol {
+				t.Fatalf("width %d: toggles moved from %d to %d for %q", width, toggleCol, got, query)
+			}
+		}
+		replaceCol := ansi.StringWidth(with[:strings.Index(with, "Replace")])
+		if statusCol := ansi.StringWidth(find[:strings.Index(find, "Aa")]); replaceCol >= statusCol {
+			t.Fatalf("width %d: buttons are not in the shared cluster: %q / %q", width, find, with)
+		}
+	}
+}
+
+func TestSearchBarFocusMovesRailNotRows(t *testing.T) {
+	e := searchEditor("cat cat", "cat")
+	e.OpenReplace()
+	e.SetReplacement("dog")
+	for _, field := range []int{SearchFieldFind, SearchFieldReplacement, SearchFieldReplace, SearchFieldAll, SearchFieldCase} {
+		e.search.field = field
+		rows := e.SearchBarView(60, Options{})
+		find, with := ansi.Strip(rows[0]), ansi.Strip(rows[1])
+		if !strings.Contains(find, "Find  cat") || !strings.Contains(with, "With  dog") {
+			t.Fatalf("field %d replaced an input row: %q / %q", field, find, with)
+		}
+		withFocused := field >= SearchFieldReplacement && field <= SearchFieldAll
+		if strings.HasPrefix(find, "▌") == withFocused || strings.HasPrefix(with, "▌") != withFocused {
+			t.Fatalf("field %d: rail on wrong row: %q / %q", field, find, with)
+		}
+		if e.Search().Field != field {
+			t.Fatal("status must report the focused field")
+		}
+	}
+}
+
+func TestSearchBarExternalKeepsDocumentHeight(t *testing.T) {
+	e := searchEditor("one\ntwo\nthree\nfour", "two")
+	e.SetSize(40, 4)
+	e.OpenReplace()
+	if got := strings.Count(e.View(Options{}), "\n") + 1; got != 4 || !strings.Contains(e.View(Options{}), "Find") {
+		t.Fatalf("built-in bar must share the editor height: %d rows", got)
+	}
+	e.SetSearchBarExternal(true)
+	view := ansi.Strip(e.View(Options{}))
+	if strings.Contains(view, "Find") || !strings.Contains(view, "four") {
+		t.Fatalf("external bar must leave all rows to the document: %q", view)
+	}
+	if len(e.SearchBarView(20, Options{})) != 2 {
+		t.Fatal("host must still be able to draw the bar")
+	}
+	e.CloseSearch()
+	if e.SearchBarView(20, Options{}) != nil {
+		t.Fatal("closed search has no bar")
+	}
+}
+
+func TestSearchBarPlainGlyphsAndHostInput(t *testing.T) {
+	e := searchEditor("cat", "cat")
+	called := 0
+	opts := Options{SearchPlain: true, SearchInput: func(_ textinput.Model, width int, _ bool) string {
+		called++
+		return strings.Repeat("#", width)
+	}}
+	row := ansi.Strip(e.SearchBarView(50, opts)[0])
+	if strings.ContainsAny(row, "▌●○") || !strings.Contains(row, "> Find") || !strings.Contains(row, "[x] Aa") {
+		t.Fatalf("plain bar: %q", row)
+	}
+	if called != 1 || !strings.Contains(row, "Find  #") {
+		t.Fatalf("host input renderer not used: %q", row)
+	}
+}
+
+func TestSearchBarCompactWidgetAndHostCells(t *testing.T) {
+	e := searchEditor("cat cat dog", "cat")
+	e.SetRegexSearchEnabled(true)
+	e.OpenReplace()
+	cells := 0
+	opts := Options{SearchInputMax: 20, SearchCell: func(label string, focused, on, toggle bool) string {
+		cells++
+		if toggle && on {
+			return "(" + label + ")"
+		}
+		return "[" + label + "]"
+	}}
+	rows := e.SearchBarView(100, opts)
+	find, with := ansi.Strip(rows[0]), ansi.Strip(rows[1])
+	for _, r := range []string{find, with} {
+		if ansi.StringWidth(r) != 100 {
+			t.Fatalf("host cells changed the row width: %d %q", ansi.StringWidth(r), r)
+		}
+	}
+	if cells != 4 || strings.Contains(find, "●") || !strings.Contains(find, "(Aa)") || !strings.Contains(find, "[.*]") {
+		t.Fatalf("toggles must come from the host cell without glyphs: %q", find)
+	}
+	// Controls follow the capped input; status sits above Replace, toggles above All.
+	col := func(row, word string) int { return ansi.StringWidth(row[:strings.Index(row, word)]) }
+	if col(find, "1 of 2") != 2+6+20+1 {
+		t.Fatalf("controls did not follow the capped input: %q", find)
+	}
+	if col(find, "1 of 2") != col(with, "[Replace]") || col(find, "(Aa)") != col(with, "[All]") {
+		t.Fatalf("rows do not share columns:\n%q\n%q", find, with)
+	}
+}
+
+func TestSearchBarPlaceholdersAndNoResults(t *testing.T) {
+	e := searchEditor("cat", "")
+	e.OpenReplace()
+	rows := e.SearchBarView(60, Options{})
+	if !strings.Contains(ansi.Strip(rows[0]), "search") || !strings.Contains(ansi.Strip(rows[1]), "replace with") {
+		t.Fatalf("empty inputs need placeholders: %q", rows)
+	}
+	e.SetSearchQuery("dog")
+	errored := false
+	row := e.SearchBarView(60, Options{SearchError: func(s string) string {
+		if s == "No results" {
+			errored = true
+		}
+		return s
+	}})[0]
+	if !errored || !strings.Contains(ansi.Strip(row), "No results") {
+		t.Fatalf("no results must use the error style: %q", ansi.Strip(row))
+	}
+}
+
+func TestSearchDirectKeysNeedNoTab(t *testing.T) {
+	alt := func(k tea.KeyType, r ...rune) tea.KeyMsg { return tea.KeyMsg{Type: k, Runes: r, Alt: true} }
+	e := searchEditor("cat cat Cat", "cat")
+	e.SetReplacement("dog")
+	undo := len(e.undo)
+	// Alt+Enter is inert until the replacement is visible.
+	e, _ = e.Update(alt(tea.KeyEnter))
+	if e.Value() != "cat cat Cat" {
+		t.Fatal("replace all must wait for the Replace row")
+	}
+	e.OpenReplace()
+	e, _ = e.Update(alt(tea.KeyEnter))
+	if e.Value() != "dog dog Cat" || len(e.undo) != undo+1 {
+		t.Fatalf("Alt+Enter must replace all as one undo step: %q", e.Value())
+	}
+	e.SetSearchQuery("cat")
+	e, _ = e.Update(alt(tea.KeyRunes, 'c'))
+	if e.Search().CaseSensitive || len(e.Search().Matches) != 1 || e.Search().Query != "cat" {
+		t.Fatalf("Alt+C must toggle case without typing: %+v", e.Search())
+	}
+	e, _ = e.Update(alt(tea.KeyRunes, 'r'))
+	if e.Search().Regex {
+		t.Fatal("Alt+R needs regex enabled by the host")
+	}
+	e.SetRegexSearchEnabled(true)
+	e, _ = e.Update(alt(tea.KeyRunes, 'r'))
+	if !e.Search().Regex || e.Search().Query != "cat" || e.Search().Replacement != "dog" {
+		t.Fatalf("Alt+R must toggle regex without typing: %+v", e.Search())
+	}
+}
+
+func TestSearchBarShowsKeysOnControls(t *testing.T) {
+	e := searchEditor("cat cat", "cat")
+	e.SetRegexSearchEnabled(true)
+	e.OpenReplace()
+	rows := e.SearchBarView(100, Options{SearchShowKeys: true})
+	find, with := ansi.Strip(rows[0]), ansi.Strip(rows[1])
+	for _, want := range []string{"Aa ⌥C", ".* ⌥R"} {
+		if !strings.Contains(find, want) {
+			t.Fatalf("missing %q: %q", want, find)
+		}
+	}
+	for _, want := range []string{"Replace ⏎", "All ⌥⏎"} {
+		if !strings.Contains(with, want) {
+			t.Fatalf("missing %q: %q", want, with)
+		}
+	}
+	col := func(row, word string) int { return ansi.StringWidth(row[:strings.Index(row, word)]) }
+	// The status lines up with the control's edge, its padding cell (or pill cap).
+	if ansi.StringWidth(find) != 100 || ansi.StringWidth(with) != 100 || col(find, "1 of 2") != col(with, "Replace")-1 {
+		t.Fatalf("keyed labels broke the grid:\n%q\n%q", find, with)
+	}
+	plain := ansi.Strip(strings.Join(e.SearchBarView(100, Options{SearchShowKeys: true, SearchPlain: true}), "\n"))
+	if !strings.Contains(plain, "Replace Enter") || !strings.Contains(plain, "All Alt+Enter") || strings.ContainsAny(plain, "⏎⌥") {
+		t.Fatalf("plain keys must be ASCII: %q", plain)
 	}
 }

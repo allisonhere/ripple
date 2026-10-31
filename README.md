@@ -185,13 +185,17 @@ Press `Ctrl+R` **inside the bar** to show/hide Replace. Opening it focuses Repla
 returns focus to Find. `Tab`/`Shift+Tab` cycle
 Find, Replacement, Replace, All, Match case, and (when available) Regex. `Enter`
 in Replacement or on Replace changes the current match and advances; Enter on
-All replaces a snapshot of every match in one undo step. Inserted text is never
+All replaces a snapshot of every match in one undo step. None of the controls
+needs Tabbing onto: `Alt+Enter` replaces all from anywhere in the bar while
+Replace is shown, `Alt+C` toggles match case, and `Alt+R` toggles regex when the
+host allows it. `Options.SearchShowKeys` prints those keys on the controls
+(`Replace ⏎`, `All ⌥⏎`, `Aa ⌥C`, `.* ⌥R`; ASCII names with `SearchPlain`). Inserted text is never
 replaced again during that operation. Copy/cut act on the whole focused input;
 paste inserts at that input's caret using the configured clipboard backend.
 
 Search is literal and case-sensitive by default. Hosts can expose the advanced
 regex toggle with `ed.SetRegexSearchEnabled(true)`; this **does not activate**
-regex. The user selects `.*:on` in the bar to use Go regular expressions and
+regex. The user switches the bar's `.*` toggle on to use Go regular expressions and
 capture replacements (`$0` for the whole match, `$1`, `${name}`). Regex `^` and
 `$` match each logical line by default; soft wrapping does not create boundaries.
 Use `\A`/`\z` for document boundaries, or `(?-m)` to disable multiline mode.
@@ -218,7 +222,25 @@ implement `:s` or `:%s`. `Ctrl+R` retains Vim redo outside the search bar.
 
 The bar reserves one editor row, or two while replacing, without increasing the
 configured height. Tiny editors show the focused controls and as much document
-as fits. No host-rendered dialog is required. Forward keys to Ripple before
+as fits. No host-rendered dialog is required. The bar is a fixed grid: the Find
+and With inputs share one width, the match count sits in a fixed slot so the
+`Aa`/`.*` toggles never move, and focus moves only the `▌` rail and the control
+highlight. Toggles show `●`/`○` (`[x]`/`[ ]` with `Options.SearchPlain`), so their
+state never depends on color alone.
+
+To place the bar elsewhere — a footer, say — call `ed.SetSearchBarExternal(true)`
+and draw `ed.SearchBarView(width, opts)` yourself; the document then keeps the
+editor's full height while search is open. `Search().Field` reports the focused
+control (`SearchFieldFind` … `SearchFieldRegex`) and `Search().Prompt` a Vim `/`
+or `?` search, for contextual key hints. `Options.SearchText`, `SearchMuted`,
+`SearchRail`, `SearchControl`, and `SearchError` theme the bar, and
+`Options.SearchInput` lets the host render the text fields like its own inputs.
+`Options.SearchInputMax` caps the field width so the controls follow the fields
+like a compact find widget, and `Options.SearchCell` renders each button and
+toggle (in exactly its label's width plus two cells, e.g. as a pill; toggles
+then carry no `●`/`○` glyph, so the cell must show on/off by shape). The match
+count sits above Replace and the toggles above All, and `No results` uses
+`SearchError`. Empty fields show `search` / `replace with` placeholders. Forward keys to Ripple before
 host shortcuts while `ed.SearchActive()` is true, especially Esc and Tab. A host
 may still intercept explicit submit shortcuts. The Find binding is configurable
 through `KeyMap.Find`; there is deliberately no Ctrl+H default because terminals

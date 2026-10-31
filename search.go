@@ -25,11 +25,27 @@ type SearchStatus struct {
 	Active, Replacing, CaseSensitive, Regex, RegexAvailable bool
 	Query, Replacement, Error, ReplacementError, Message    string
 	Current                                                 int
-	Matches                                                 []Match
+	// Field is the focused search-bar control, one of the SearchField values.
+	Field int
+	// Prompt reports a vim / or ? search: Enter accepts it and Esc restores
+	// the position the search started from.
+	Prompt  bool
+	Matches []Match
 }
+
+// Search-bar controls in Tab order, as reported by SearchStatus.Field.
+const (
+	SearchFieldFind = iota
+	SearchFieldReplacement
+	SearchFieldReplace
+	SearchFieldAll
+	SearchFieldCase
+	SearchFieldRegex
+)
 
 type searchState struct {
 	active, replacing, ignoreCase, regex, allowed bool
+	external                                      bool // host draws the bar via SearchBarView
 	query, replacement                            textinput.Model
 	field                                         int // find, replacement, replace, all, case, regex
 	generation                                    uint64
@@ -91,10 +107,12 @@ func (m *Model) openSearch(replacing bool, vimDirection int) {
 		}
 		s.query = textinput.New()
 		s.query.Prompt = ""
+		s.query.Placeholder = "search"
 		s.query.CharLimit = 0
 		s.query.SetValue(q)
 		s.replacement = textinput.New()
 		s.replacement.Prompt = ""
+		s.replacement.Placeholder = "replace with"
 		s.replacement.CharLimit = 0
 		s.replacement.SetValue(r)
 		s.originCursor, s.originAnchor, s.originViewport = m.cursor, m.selAnchor, m.viewport
@@ -168,7 +186,25 @@ func (m Model) Search() SearchStatus {
 	m.refreshSearch()
 	s := m.search
 	return SearchStatus{Active: s.active, Replacing: s.replacing, CaseSensitive: !s.ignoreCase, Regex: s.regex, RegexAvailable: s.allowed,
-		Query: s.query.Value(), Replacement: s.replacement.Value(), Error: s.err, ReplacementError: s.replacementErr, Message: s.message, Current: s.current + 1, Matches: append([]Match(nil), s.matches...)}
+		Query: s.query.Value(), Replacement: s.replacement.Value(), Error: s.err, ReplacementError: s.replacementErr, Message: s.message, Current: s.current + 1, Field: s.field, Prompt: s.vimPrompt, Matches: append([]Match(nil), s.matches...)}
+}
+
+// SetSearchBarExternal hands the search bar to the host, which draws it with
+// SearchBarView wherever it likes. The document then keeps the editor's full
+// height while search is open instead of giving rows to the bar.
+func (m *Model) SetSearchBarExternal(on bool) {
+	m.search.external = on
+	m.ensureCursorVisible()
+}
+
+// SearchBarView renders the open search bar in width cells: the Find row, then
+// the With row while replacing. It returns nil while search is closed.
+func (m Model) SearchBarView(width int, opts Options) []string {
+	if !m.search.active {
+		return nil
+	}
+	m.refreshSearch()
+	return m.searchBar(width, opts, 2)
 }
 
 func (m *Model) refreshSearch() {
@@ -315,7 +351,7 @@ func (m *Model) ReplaceCurrent() bool {
 		}
 		m.selectSearchMatch(index)
 	}
-	m.search.message = "Replaced 1 match"
+	m.search.message = "1 replaced"
 	return true
 }
 
@@ -349,7 +385,7 @@ func (m *Model) ReplaceAll() int {
 	m.cursor = clampInt(caret, 0, len(m.text))
 	m.selAnchor = -1
 	m.goalCol = -1
-	m.search.message = fmt.Sprintf("Replaced %d matches", len(matches))
+	m.search.message = fmt.Sprintf("%d replaced", len(matches))
 	m.refreshSearch()
 	m.ensureCursorVisible()
 	return len(matches)
@@ -452,6 +488,19 @@ func (m Model) searchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.SetSearchRegex(!s.regex)
 		}
 		return m, nil
+	// Direct keys work from any control, so nothing needs Tabbing onto.
+	case "alt+enter":
+		// Only with the replacement visible, never with hidden text.
+		if s.replacing {
+			m.ReplaceAll()
+		}
+		return m, nil
+	case "alt+c":
+		m.SetSearchCaseSensitive(s.ignoreCase)
+		return m, nil
+	case "alt+r":
+		m.SetSearchRegex(!s.regex)
+		return m, nil
 	case "ctrl+v":
 		if s.field > 1 || m.clipboard == nil {
 			return m, nil
@@ -508,7 +557,7 @@ func (m *Model) searchPaste(text string, field int) {
 }
 
 func (m Model) searchRows() int {
-	if !m.search.active {
+	if !m.search.active || m.search.external {
 		return 0
 	}
 	if m.search.replacing && m.height >= 3 {
@@ -518,122 +567,193 @@ func (m Model) searchRows() int {
 }
 func (m Model) documentHeight() int { return max(0, m.height-m.searchRows()) }
 
-func (m Model) searchBar(opts Options) []string {
+// searchBar lays the bar out on a fixed grid: focus rail, label column, input,
+// then a control cluster whose width covers both rows. The Find and With inputs
+// therefore share one width, the status slot never resizes as its text changes,
+// and moving focus only moves the rail and the highlight — no row is swapped
+// out. rows is 1 when only the focused row fits.
+func (m Model) searchBar(width int, opts Options, rows int) []string {
 	s := m.search
-	width := max(1, m.width)
-	style := opts.SearchControl
-	if style == nil {
-		style = func(text string) string { return lipgloss.NewStyle().Reverse(true).Render(text) }
+	width = max(1, width)
+	identity := func(text string) string { return text }
+	text, muted, rail := opts.SearchText, opts.SearchMuted, opts.SearchRail
+	control, errorStyle := opts.SearchControl, opts.SearchError
+	if text == nil {
+		text = identity
 	}
-	button := func(field int, label string) string {
-		if s.field == field {
-			return style("[" + label + "]")
-		}
-		return "[" + label + "]"
+	if muted == nil {
+		muted = func(t string) string { return lipgloss.NewStyle().Faint(true).Render(t) }
 	}
-	status := "No matches"
-	if len(s.matches) > 0 {
-		status = fmt.Sprintf("%d/%d", s.current+1, len(s.matches))
+	if rail == nil {
+		rail = text
 	}
-	if s.message != "" {
-		status = s.message
+	if control == nil {
+		control = func(t string) string { return lipgloss.NewStyle().Reverse(true).Render(t) }
 	}
-	if s.err != "" {
-		status = "Invalid regex: " + s.err
-		if opts.SearchError != nil {
-			status = opts.SearchError(status)
-		}
+	if errorStyle == nil {
+		errorStyle = text
 	}
-	caseLabel := "Aa:off"
-	if !s.ignoreCase {
-		caseLabel = "Aa:on"
-	}
-	controls := button(4, caseLabel)
-	if s.allowed {
-		label := ".*:off"
-		if s.regex {
-			label = ".*:on"
-		}
-		controls += " " + button(5, label)
+	railGlyph, onGlyph, offGlyph := "▌ ", "●", "○"
+	if opts.SearchPlain {
+		railGlyph, onGlyph, offGlyph = "> ", "[x]", "[ ]"
 	}
 
-	renderInput := func(input textinput.Model, label string, focused bool, suffix string) string {
-		// Leave room for textinput's extra caret cell. Clip the feedback, never
-		// drop it entirely when an error or count exceeds the available space.
-		prefix := label
-		if width < 12 {
-			prefix = string([]rune(label)[:1])
+	findLabel := "Find"
+	if s.vimPrompt {
+		findLabel = "/"
+		if s.direction < 0 {
+			findLabel = "?"
 		}
-		prefixW := lipgloss.Width(prefix)
-		available := max(0, width-prefixW-1)
-		feedbackW := min(lipgloss.Width(suffix), max(0, available/2))
-		if lipgloss.Width(suffix) <= available-9 {
-			feedbackW = lipgloss.Width(suffix)
+	}
+	countStatus := func(compact bool) string {
+		switch {
+		case s.err != "":
+			return "Invalid regex"
+		case s.message != "":
+			return s.message
+		case len(s.matches) > 0 && s.current >= 0:
+			if compact {
+				return fmt.Sprintf("%d/%d", s.current+1, len(s.matches))
+			}
+			return fmt.Sprintf("%d of %d", s.current+1, len(s.matches))
+		case len(s.matches) > 0:
+			return fmt.Sprintf("%d found", len(s.matches))
+		case s.query.Value() != "":
+			return "No results"
 		}
-		fieldW := available
-		if feedbackW > 0 {
-			fieldW -= feedbackW + 1
+		return ""
+	}
+
+	// Controls keep a cell of padding on each side whether or not they are
+	// focused, so the highlight never shifts their neighbours. A host's
+	// SearchCell fills those same cells (with pill caps, say).
+	cell := func(field int, label string, on, isToggle bool) string {
+		if opts.SearchCell != nil {
+			return opts.SearchCell(label, s.field == field, on, isToggle)
 		}
-		input.Width = max(1, fieldW-1)
+		padded := " " + label + " "
+		switch {
+		case s.field == field:
+			return control(padded)
+		case on:
+			return text(padded)
+		}
+		return muted(padded)
+	}
+	toggle := func(field int, on bool, label string) (string, int) {
+		if opts.SearchCell == nil {
+			glyph := offGlyph
+			if on {
+				glyph = onGlyph
+			}
+			label = glyph + " " + label
+		}
+		return cell(field, label, on, true), lipgloss.Width(label) + 2
+	}
+	// With SearchShowKeys each control names its direct key, inside the label
+	// so the grid measures it.
+	showKeys := opts.SearchShowKeys
+	keyed := func(label, glyphKey, plainKey string) string {
+		switch {
+		case !showKeys:
+			return label
+		case opts.SearchPlain:
+			return label + " " + plainKey
+		}
+		return label + " " + glyphKey
+	}
+	var toggles, replaceCell, allCell string
+	var togglesW, replaceW, allW int
+	replaceOK := s.err == "" && s.replacementErr == ""
+	build := func() {
+		caseCell, caseW := toggle(SearchFieldCase, !s.ignoreCase, keyed("Aa", "⌥C", "Alt+C"))
+		toggles, togglesW = caseCell, caseW
+		if s.allowed {
+			regexCell, regexW := toggle(SearchFieldRegex, s.regex, keyed(".*", "⌥R", "Alt+R"))
+			toggles += text(" ") + regexCell
+			togglesW += 1 + regexW
+		}
+		replaceLabel, allLabel := keyed("Replace", "⏎", "Enter"), keyed("All", "⌥⏎", "Alt+Enter")
+		replaceCell = cell(SearchFieldReplace, replaceLabel, replaceOK && s.current >= 0, false)
+		allCell = cell(SearchFieldAll, allLabel, replaceOK && len(s.matches) > 0, false)
+		replaceW, allW = lipgloss.Width(replaceLabel)+2, lipgloss.Width(allLabel)+2
+	}
+	build()
+
+	// The status slot sits above Replace and the toggles above All, so both
+	// rows share one set of columns. Shed width from the chrome — the key
+	// labels first — before squeezing the input below a usable size.
+	labelW, statusW, compact := 6, 13, false
+	slotW := func() int { return max(statusW, replaceW) }
+	clusterW := func() int { return 1 + slotW() + 1 + max(togglesW, allW) }
+	if showKeys && width-2-labelW-clusterW() < 12 {
+		showKeys = false
+		build()
+	}
+	if width-2-labelW-clusterW() < 12 {
+		statusW, compact = 7, true
+	}
+	if width-2-labelW-clusterW() < 8 {
+		labelW = 2
+	}
+	inputW := max(1, width-2-labelW-clusterW())
+	if opts.SearchInputMax > 0 {
+		inputW = min(inputW, opts.SearchInputMax)
+	}
+
+	status := countStatus(compact)
+	statusCell := muted
+	if s.err != "" || (len(s.matches) == 0 && s.query.Value() != "" && s.message == "") {
+		statusCell = errorStyle
+	}
+	if lipgloss.Width(status) > slotW() {
+		status = ansi.Truncate(status, slotW(), "…")
+	}
+	findCluster := text(" ") + statusCell(status) + text(strings.Repeat(" ", slotW()-lipgloss.Width(status)+1)) + toggles
+	withCluster := text(" ") + replaceCell + text(strings.Repeat(" ", slotW()-replaceW+1)) + allCell
+	if s.replacementErr != "" && s.field != SearchFieldReplace && s.field != SearchFieldAll {
+		withCluster = text(" ") + errorStyle(ansi.Truncate("Invalid replacement: "+s.replacementErr, clusterW()-1, "…"))
+	}
+
+	renderInput := func(input textinput.Model, focused bool) string {
+		// Leave room for textinput's extra caret cell.
+		input.Width = max(1, inputW-1)
 		input.SetCursor(input.Position()) // update horizontal scrolling for this width
 		if m.blurred {
 			input.Blur()
 		}
+		var field string
+		if opts.SearchInput != nil {
+			field = opts.SearchInput(input, inputW, focused)
+		} else {
+			field = input.View()
+		}
+		field = ansi.Truncate(field, inputW, "")
+		return field + text(strings.Repeat(" ", max(0, inputW-lipgloss.Width(field))))
+	}
+	row := func(label string, input textinput.Model, inputField int, focused bool, cluster string) string {
+		marker := text("  ")
+		labelCell := muted
 		if focused {
-			prefix = style(prefix)
+			marker, labelCell = rail(railGlyph), text
 		}
-		field := ansi.Truncate(input.View(), max(0, fieldW), "")
-		field += strings.Repeat(" ", max(0, fieldW-lipgloss.Width(field)))
-		line := prefix + " " + field
-		if feedbackW > 0 {
-			line += " " + ansi.Truncate(suffix, feedbackW, "…")
+		if labelW < lipgloss.Width(label)+2 {
+			label = string([]rune(label)[:1])
 		}
-		return ansi.Truncate(line, width, "")
+		line := marker + labelCell(label) + text(strings.Repeat(" ", max(0, labelW-lipgloss.Width(label)))) +
+			renderInput(input, s.field == inputField) + cluster
+		line = ansi.Truncate(line, width, "")
+		return line + text(strings.Repeat(" ", max(0, width-lipgloss.Width(line))))
 	}
-	queryLabel := "Find:"
-	if s.vimPrompt {
-		queryLabel = "/"
-		if s.direction < 0 {
-			queryLabel = "?"
-		}
-	}
-	// Errors/counts take precedence while typing; action controls take precedence
-	// when focused. This keeps every control reachable even in a tiny terminal.
-	suffix := status + " " + controls
-	if s.field >= 4 {
-		suffix = controls + " " + status
-	}
-	find := renderInput(s.query, queryLabel, s.field == 0, suffix)
-	if s.field >= 4 {
-		label := caseLabel
-		if s.field == 5 {
-			label = ".*:off"
-			if s.regex {
-				label = ".*:on"
-			}
-		}
-		find = ansi.Truncate(button(s.field, label)+" "+status, width, "")
-	}
+
+	withFocused := s.field >= SearchFieldReplacement && s.field <= SearchFieldAll
+	find := row(findLabel, s.query, SearchFieldFind, !withFocused, findCluster)
 	if !s.replacing {
 		return []string{find}
 	}
-	replacementSuffix := button(2, "Replace") + " " + button(3, "All")
-	if s.replacementErr != "" {
-		replacementSuffix = "Invalid replacement: " + s.replacementErr
-		if opts.SearchError != nil {
-			replacementSuffix = opts.SearchError(replacementSuffix)
-		}
-	}
-	replace := renderInput(s.replacement, "With:", s.field == 1, replacementSuffix)
-	if s.field == 2 || s.field == 3 {
-		feedback := status
-		if s.replacementErr != "" {
-			feedback = replacementSuffix
-		}
-		replace = ansi.Truncate(button(s.field, map[int]string{2: "Replace", 3: "All"}[s.field])+" "+feedback, width, "")
-	}
-	if m.searchRows() == 1 {
-		if s.field >= 1 && s.field <= 3 {
+	replace := row("With", s.replacement, SearchFieldReplacement, withFocused, withCluster)
+	if rows == 1 {
+		if withFocused {
 			return []string{replace}
 		}
 		return []string{find}
@@ -719,11 +839,11 @@ func (m Model) searchBinding() key.Binding {
 	return m.keys.Find
 }
 
-func (m Model) searchBarIfActive(opts Options) []string {
-	if !m.SearchActive() {
+func (m Model) searchBarIfActive(width int, opts Options) []string {
+	if !m.SearchActive() || m.search.external {
 		return nil
 	}
-	return m.searchBar(opts)
+	return m.searchBar(width, opts, m.searchRows())
 }
 
 // Validate references before ExpandString can silently erase an unknown group.

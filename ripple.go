@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 )
@@ -36,6 +37,31 @@ type Options struct {
 	SearchMatch, SearchCurrent func(string) string
 	// SearchControl styles the focused search control; SearchError styles errors.
 	SearchControl, SearchError func(string) string
+	// SearchText styles plain search-bar text and the gaps between controls, so
+	// a host can give the whole bar one background. SearchMuted styles secondary
+	// text: labels at rest, counts, and controls that are off or unavailable.
+	SearchText, SearchMuted func(string) string
+	// SearchRail styles the focus marker drawn beside the focused search row.
+	SearchRail func(string) string
+	// SearchInput, when non-nil, renders a search text field in exactly width
+	// cells, letting a host draw it like its own form inputs. The input's Width
+	// and horizontal scroll are already set for width.
+	SearchInput func(input textinput.Model, width int, focused bool) string
+	// SearchPlain swaps the search bar's Unicode glyphs for ASCII.
+	SearchPlain bool
+	// SearchInputMax, when positive, caps the width of the search text fields;
+	// the controls then follow the fields instead of the row's right edge.
+	SearchInputMax int
+	// SearchCell, when non-nil, renders a search-bar button or toggle in
+	// exactly width(label)+2 cells (e.g. as a pill). on means a button is
+	// available or a toggle is switched on; toggle tells the two apart. With
+	// SearchCell set, toggle labels carry no on/off glyph — the cell must show
+	// the state itself, by more than color alone.
+	SearchCell func(label string, focused, on, toggle bool) string
+	// SearchShowKeys labels each search control with its direct key — Enter
+	// for Replace, Alt+Enter for All, Alt+C for match case, Alt+R for regex —
+	// so none of them needs Tabbing onto.
+	SearchShowKeys bool
 	// Cursor is drawn at the caret cell (e.g. a styled space or block). Empty
 	// defaults to a single space; nothing is drawn while the editor is blurred.
 	Cursor string
@@ -504,7 +530,7 @@ func (m Model) View(opts Options) string {
 	m.clamp()
 	m.refreshSearch()
 	totalHeight := m.height
-	bars := m.searchBarIfActive(opts)
+	bars := m.searchBarIfActive(m.width, opts)
 	opts = m.searchRenderOptions(opts)
 	m.ensureCursorVisible()
 	m.height = m.documentHeight()
