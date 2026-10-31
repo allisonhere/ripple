@@ -87,6 +87,8 @@ each line to the configured width instead.
 | Undo / redo | `ctrl+z` / `ctrl+y` |
 | Copy / cut / paste | `ctrl+c` / `ctrl+x` / `ctrl+v` |
 | Page | pgup / pgdn |
+| Find / replace | `ctrl+f`; `ctrl+r` inside the bar (see [Search and replace](#search-and-replace)) |
+| Next / previous match | `f3` / `shift+f3` |
 
 Editing commands are configurable via `KeyMap` and `SetKeyMap`. Text input and
 cursor movement are fixed.
@@ -168,10 +170,6 @@ Runs also split wherever the selection state changes, so a `Style` call always
 wraps a self-contained, uniformly-styled fragment — a full SGR reset per call
 (what `lipgloss.Style.Render` already does) is safe and won't clobber a
 selection or cursor layered on top of highlighted text.
-
-## License
-
-MIT (see repository).
 
 ## Search and replace
 
@@ -258,3 +256,7 @@ styling hooks. Syntax styling runs first, search highlighting second, and
 selection/cursor last. Defaults underline matches and reverse the current hit
 and focused control. The terminal harness enables the advanced regex toggle for
 interactive testing (`go run ./cmd/rippletest`).
+
+## License
+
+MIT (see repository).
