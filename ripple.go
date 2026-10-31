@@ -32,6 +32,10 @@ type PasteMsg struct {
 
 // Options controls how View renders. All fields are optional.
 type Options struct {
+	// SearchMatch and SearchCurrent style search hits below selection/cursor.
+	SearchMatch, SearchCurrent func(string) string
+	// SearchControl styles the focused search control; SearchError styles errors.
+	SearchControl, SearchError func(string) string
 	// Cursor is drawn at the caret cell (e.g. a styled space or block). Empty
 	// defaults to a single space; nothing is drawn while the editor is blurred.
 	Cursor string
@@ -87,6 +91,7 @@ type Model struct {
 
 	inputMode InputMode
 	vim       vimState
+	search    searchState
 }
 
 // KeyMap holds the editor's editing-command bindings. Text input and cursor
@@ -94,6 +99,7 @@ type Model struct {
 // selection variants) are fixed; only the discrete commands below are
 // reconfigurable. Override the defaults with SetKeyMap.
 type KeyMap struct {
+	Find      key.Binding
 	Undo      key.Binding
 	Redo      key.Binding
 	SelectAll key.Binding
@@ -105,6 +111,7 @@ type KeyMap struct {
 // DefaultKeyMap returns the conventional desktop-editor bindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
+		Find:      key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("ctrl+f", "find")),
 		Undo:      key.NewBinding(key.WithKeys("ctrl+z"), key.WithHelp("ctrl+z", "undo")),
 		Redo:      key.NewBinding(key.WithKeys("ctrl+y"), key.WithHelp("ctrl+y", "redo")),
 		SelectAll: key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "select all")),
@@ -128,6 +135,7 @@ func (m Model) Value() string {
 // SetValue replaces the whole document and resets undo/redo history — loading
 // fresh content is a new starting point, not an undoable edit.
 func (m *Model) SetValue(s string) {
+	m.CloseSearch()
 	m.text = []rune(sanitizeInput(s))
 	m.cursor = len(m.text)
 	m.selAnchor = -1
@@ -315,7 +323,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case searchPasteMsg:
+		if m.search.active && msg.generation == m.search.generation && msg.err == nil {
+			m.searchPaste(msg.text, msg.field)
+		}
+		return m, nil
 	case PasteMsg:
+		if m.SearchActive() {
+			if msg.Err == nil && m.search.field <= 1 {
+				m.searchPaste(msg.Text, m.search.field)
+			}
+			return m, nil
+		}
 		if msg.Err == nil && msg.Text != "" {
 			m.InsertString(stripCombiningMarks(msg.Text))
 		}
@@ -325,6 +344,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.SearchActive() {
+		return m.searchKey(msg)
+	}
+	if key.Matches(msg, m.searchBinding()) {
+		m.OpenSearch()
+		return m, nil
+	}
+	if msg.String() == "f3" {
+		m.FindNext()
+		return m, nil
+	}
+	if msg.String() == "shift+f3" {
+		m.FindPrevious()
+		return m, nil
+	}
 	if m.inputMode == ModeVim {
 		return m.handleVim(msg)
 	}
@@ -434,9 +468,9 @@ func (m *Model) handleInput(msg tea.KeyMsg) {
 	// selection variants cannot be wired up cleanly; page motion clears any
 	// selection like an unshifted arrow.
 	case tea.KeyPgUp:
-		m.moveVertical(-m.height, false)
+		m.moveVertical(-max(1, m.documentHeight()), false)
 	case tea.KeyPgDown:
-		m.moveVertical(m.height, false)
+		m.moveVertical(max(1, m.documentHeight()), false)
 	}
 }
 
@@ -467,10 +501,30 @@ func (m Model) pasteCmd() tea.Cmd {
 // already wrapped to the configured width — clip or pad it to frame it, but do
 // not re-wrap it (see the package doc).
 func (m Model) View(opts Options) string {
+	m.clamp()
+	m.refreshSearch()
+	totalHeight := m.height
+	bars := m.searchBarIfActive(opts)
+	opts = m.searchRenderOptions(opts)
+	m.ensureCursorVisible()
+	m.height = m.documentHeight()
+	if m.height <= 0 {
+		return strings.Join(bars, "\n")
+	}
+	document := m.viewDocument(opts)
+	if len(bars) == 0 {
+		return document
+	}
+	rows := strings.Split(document, "\n")
+	rows = append(rows, bars...)
+	return strings.Join(rows[:min(totalHeight, len(rows))], "\n")
+}
+
+func (m Model) viewDocument(opts Options) string {
 	// The cursor is only drawn while focused; a blurred editor renders its
 	// glyphs unobscured.
 	cursor := ""
-	if !m.blurred {
+	if !m.blurred && !m.SearchActive() {
 		cursor = opts.Cursor
 		if cursor == "" {
 			cursor = " "
@@ -773,12 +827,12 @@ func (m *Model) ensureCursorVisible() {
 	if row < m.viewport {
 		m.viewport = row
 	}
-	if row >= m.viewport+m.height {
-		m.viewport = row - m.height + 1
+	if row >= m.viewport+max(1, m.documentHeight()) {
+		m.viewport = row - max(1, m.documentHeight()) + 1
 	}
 	// Keep the viewport stable at the document edges: never scroll past the
 	// last page (which would show only blank rows) and never go negative.
-	maxTop := len(m.visualLines()) - m.height
+	maxTop := len(m.visualLines()) - max(1, m.documentHeight())
 	if maxTop < 0 {
 		maxTop = 0
 	}

@@ -82,8 +82,9 @@ func newModel() model {
 	ed := ripple.New()
 	ed.SetSize(64, 12)
 	ed.SetClipboard(sysClip{})
+	ed.SetRegexSearchEnabled(true)
 	ed.SetPlaceholder("Type here. F2 toggles vim mode. Ctrl+Q quits.")
-	return model{ed: ed, edW: 64, edH: 12, status: "plain mode — press F2 for vim"}
+	return model{ed: ed, edW: 64, edH: 12, status: "plain mode — Ctrl+F find, Ctrl+R in Find replaces; F2 vim"}
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -91,7 +92,7 @@ func (m model) Init() tea.Cmd { return nil }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		w := min(msg.Width-6, 72)
+		w := max(1, min(msg.Width-6, 72))
 		h := max(3, msg.Height-7)
 		m.ed.SetSize(w, h)
 		m.edW, m.edH = w, h
@@ -144,7 +145,7 @@ func (m model) View() string {
 	// ripple renders each line to its own length, not padded to the editor width,
 	// so frame it at a fixed width — otherwise the border collapses to the longest
 	// line and grows as you type. Height is already exact (View returns edH lines).
-	body := frameStyle.Width(m.edW).Render(m.ed.View(opts))
+	body := frameStyle.Width(m.edW + frameStyle.GetHorizontalPadding()).Render(m.ed.View(opts))
 
 	// Header: the mode indicator and any ":" command line being typed.
 	header := "plain"

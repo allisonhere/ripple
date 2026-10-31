@@ -172,3 +172,67 @@ selection or cursor layered on top of highlighted text.
 ## License
 
 MIT (see repository).
+
+## Search and replace
+
+`Ctrl+F` opens the built-in Find bar. Matches update as you type, with a current
+match count and highlights. `Enter` in Find or `F3` advances; `Shift+F3` goes
+backward. Navigation wraps. A single-line selection seeds Find; otherwise the
+last query is reused. `Esc` closes the bar and leaves the document at its current
+match. Search itself never changes undo history.
+
+Press `Ctrl+R` **inside the bar** to show/hide Replace. Opening it focuses Replacement immediately; hiding it
+returns focus to Find. `Tab`/`Shift+Tab` cycle
+Find, Replacement, Replace, All, Match case, and (when available) Regex. `Enter`
+in Replacement or on Replace changes the current match and advances; Enter on
+All replaces a snapshot of every match in one undo step. Inserted text is never
+replaced again during that operation. Copy/cut act on the whole focused input;
+paste inserts at that input's caret using the configured clipboard backend.
+
+Search is literal and case-sensitive by default. Hosts can expose the advanced
+regex toggle with `ed.SetRegexSearchEnabled(true)`; this **does not activate**
+regex. The user selects `.*:on` in the bar to use Go regular expressions and
+capture replacements (`$0` for the whole match, `$1`, `${name}`). Regex `^` and
+`$` match each logical line by default; soft wrapping does not create boundaries.
+Use `\A`/`\z` for document boundaries, or `(?-m)` to disable multiline mode.
+For example, replace `^> ` with nothing to strip quote prefixes from every line.
+
+In regex replacement text, `$$` produces a literal dollar: replacing `cat` with
+`$$5` in `price cat` produces `price $5`. Unknown capture groups (such as `$5`
+without a fifth group) show a replacement error and block both replacement
+actions without changing the document or undo history. Valid optional groups
+that did not match expand to empty. Names are greedy: `${1}suffix` means group 1
+followed by `suffix`; `$1suffix` refers to a group named `1suffix`. Malformed
+dollar references follow Go's literal-text behavior. `Search().Error` reports
+pattern errors; `Search().ReplacementError` reports replacement errors without
+preventing find/navigation. Empty queries and invalid patterns cannot
+replace text. Zero-width regex matches are supported and navigation progresses
+between document positions. In literal mode, dollar signs and backslashes in
+replacement text stay literal. Matching spans explicit newlines, independently
+of visual wrapping; hosts can supply multiline queries through `SetSearchQuery`.
+
+Vim Normal/Visual mode supports `/`, `?`, `n`, and `N`. `/` and `?` preview
+incrementally; Enter accepts, Esc restores the prior caret/selection and query.
+`n` repeats the accepted direction and `N` reverses it. This version does not
+implement `:s` or `:%s`. `Ctrl+R` retains Vim redo outside the search bar.
+
+The bar reserves one editor row, or two while replacing, without increasing the
+configured height. Tiny editors show the focused controls and as much document
+as fits. No host-rendered dialog is required. Forward keys to Ripple before
+host shortcuts while `ed.SearchActive()` is true, especially Esc and Tab. A host
+may still intercept explicit submit shortcuts. The Find binding is configurable
+through `KeyMap.Find`; there is deliberately no Ctrl+H default because terminals
+commonly report it as Backspace.
+
+Hosts can also use `OpenSearch`, `OpenReplace`, `CloseSearch`, `Search`,
+`SetSearchQuery`, `SetReplacement`, `SetSearchCaseSensitive`, `SetSearchRegex`,
+`FindNext`, `FindPrevious`, `ReplaceCurrent`, and `ReplaceAll`. Search results use
+rune offsets in `Value`, matching `ReplaceRange`. `Search` returns copied results
+and current count/error state, including after host edits or undo/redo.
+`SetValue` closes the bar; reopening retains the previous query.
+
+`Options.SearchMatch`, `SearchCurrent`, `SearchControl`, and `SearchError` provide
+styling hooks. Syntax styling runs first, search highlighting second, and
+selection/cursor last. Defaults underline matches and reverse the current hit
+and focused control. The terminal harness enables the advanced regex toggle for
+interactive testing (`go run ./cmd/rippletest`).

@@ -43,6 +43,17 @@
 // jumps with ctrl, home/end, page up/down, and shift selection variants) are
 // fixed.
 //
+// # Search and replace
+//
+// Ctrl+F opens the built-in Find bar; Ctrl+R inside it expands replacement
+// controls. Enter/F3 advances and Shift+F3 goes backward. Tab cycles controls,
+// Esc closes. Hosts should route keys to the editor while [Model.SearchActive]
+// is true. [Model.SetRegexSearchEnabled] exposes an advanced regex toggle;
+// literal matching remains the default. [Model.ReplaceAll] is one undo step.
+// [Model.Search] exposes results as rune offsets. Search appearance is provided
+// by Options.SearchMatch, SearchCurrent, SearchControl, and SearchError.
+// Vim also supports /, ?, n, and N; :s substitution is not implemented.
+//
 // # Vim mode
 //
 // Modal (vim-style) editing is available as an opt-in via [Model.SetInputMode]

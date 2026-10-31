@@ -59,6 +59,7 @@ type vimState struct {
 // plain leaves the document untouched. Default is ModePlain, so existing callers
 // are unaffected.
 func (m *Model) SetInputMode(mode InputMode) {
+	m.CloseSearch()
 	m.inputMode = mode
 	m.vim = vimState{mode: vimNormal}
 	if mode == ModeVim {
@@ -294,6 +295,9 @@ func (m Model) vimNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // pending). It consumes and resets the pending count.
 func (m Model) vimCommand(r rune) (Model, tea.Cmd) {
 	count := m.takeCount()
+	if next, cmd, handled := m.vimSearchCommand(r, count); handled {
+		return next, cmd
+	}
 	visual := m.vim.mode == vimVisual || m.vim.mode == vimVisualLine
 
 	switch r {
