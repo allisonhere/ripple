@@ -134,7 +134,7 @@ place (a block cursor that still shows its glyph) for Normal/Visual mode, while
 Insert can keep a bar via `Options.Cursor`.
 
 A runnable harness lives in `cmd/rippletest` (`go run ./cmd/rippletest`; `F2`
-toggles vim, `Ctrl+Q` quits).
+toggles vim, `F4` toggles wrapping, `Ctrl+Q` quits).
 
 ## Syntax highlighting
 
@@ -256,6 +256,40 @@ styling hooks. Syntax styling runs first, search highlighting second, and
 selection/cursor last. Defaults underline matches and reverse the current hit
 and focused control. The terminal harness enables the advanced regex toggle for
 interactive testing (`go run ./cmd/rippletest`).
+
+## Optional word-aware wrapping
+
+Character wrapping remains the default, including for a zero-value `Model`.
+Opt in to wrapping at whitespace boundaries with `SetWrapMode`:
+
+```go
+ed := ripple.New()
+ed.SetSize(40, 10)
+ed.SetWrapMode(ripple.WrapWord)
+ed.SetValue("Words stay together where possible, without changing the document.")
+
+// Switch back to the original character-based layout:
+ed.SetWrapMode(ripple.WrapCharacter)
+```
+
+`WrapWord` prefers the last whitespace boundary that fits; long unbroken words
+fall back to character wrapping. Whitespace stays in the buffer and on visual
+rows: spaces are never trimmed, collapsed, or replaced. Widths use terminal
+cells, including wide Unicode characters, rather than byte counts. An individual
+wide rune cannot be split to fit a one-cell editor, matching character mode.
+As in character mode, an exact-width line has an extra visual row for its caret.
+
+Wrapping is purely visual: changing modes or calling `SetSize` to reflow does
+not insert newlines, change `Value()`, move selection endpoints in the document,
+or add undo/redo steps. Up/Down navigate visual rows; Home/End still navigate
+hard (explicit-newline) lines. Reflow keeps the caret visible. Placeholders use
+the selected wrap mode too. Continue rendering `View` without wrapping it again.
+
+For manual testing, run `go run ./cmd/rippletest --wrap-demo`. The optional flag
+loads editable prose, long words, whitespace, punctuation, and Unicode examples;
+without it, the harness starts empty as before. `F4` switches wrapping modes and
+the header displays the current mode. Toggling never reloads the sample text.
+Resize the terminal to inspect reflow; `F2` and `Ctrl+Q` retain their usual roles.
 
 ## License
 
