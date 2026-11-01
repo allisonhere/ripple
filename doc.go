@@ -36,6 +36,15 @@
 // disagree on wide runes and overflow. Clip/pad to the configured width
 // instead.
 //
+// # Host mouse support
+//
+// Hosts can translate mouse coordinates into [Model.PlaceCursor],
+// [Model.ExtendSelectionTo], and [Model.SelectWordAt], using zero-based viewport
+// rows and terminal-cell columns. [Model.ScrollRows] scrolls independently of
+// the caret; explicit scrolling survives View until keyboard activity or resizing
+// restores caret visibility. Gesture recognition and autoscroll timers belong
+// to the host; Ripple itself does not consume mouse events.
+//
 // # Keys
 //
 // Editing commands (undo/redo, select-all, copy/cut/paste) are configurable via
