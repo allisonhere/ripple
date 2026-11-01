@@ -33,7 +33,8 @@ func (m *model) stopDrag() {
 	m.dragging = false
 }
 
-// The single-line header precedes the frame. Match the frame's actual borders
+// newProgram anchors the view at terminal (0,0) in the alternate screen.
+// The single-line header precedes the frame; account for its actual borders
 // and padding without rendering the editor to measure its position.
 func (m model) editorRect() (x, y, width, height int) {
 	x = frameStyle.GetBorderLeftSize() + frameStyle.GetPaddingLeft()

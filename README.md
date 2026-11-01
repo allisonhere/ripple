@@ -320,7 +320,10 @@ not implemented. Find/Replace remains keyboard-operated; the harness ignores
 mouse events while its bar is open. Clipboard shortcuts use the existing OS
 clipboard integration, and demo edits support the existing undo/redo commands.
 
-The harness enables Bubble Tea button-motion reporting for its lifetime; F5 gates
+The harness uses the terminal's alternate screen, anchoring the header and editor
+independently of the shell cursor position and restoring the shell screen on exit.
+This keeps absolute terminal mouse coordinates aligned with the rendered editor.
+It enables Bubble Tea button-motion reporting for its lifetime; F5 gates
 handling rather than terminal reporting. No idle pointer-motion loop is requested,
 and only active out-of-bounds drags schedule autoscroll ticks. Resize the terminal
 to test layout and coordinate translation in your terminal emulator.

@@ -215,7 +215,7 @@ func main() {
 	}
 	// Cell motion reports button drags without idle pointer-motion traffic.
 	// F5 controls handling; reporting remains enabled for the program lifetime.
-	p := tea.NewProgram(m, tea.WithMouseCellMotion())
+	p := newProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "rippletest:", err)
 		os.Exit(1)
@@ -231,4 +231,12 @@ func mouseDemo() string {
 		b.WriteString("Unicode: café Ελληνικά привет 日本語 中文 界界 🙂.\nhttps://example.org/a/very/long/unbroken/path/to/test/character/wrapping\n\n")
 	}
 	return b.String()
+}
+
+// Mouse reports use absolute terminal cells. Anchor the view at (0,0) in the
+// alternate screen instead of inheriting the shell cursor's inline origin.
+// Keep startup in one place so integration tests exercise this contract.
+func newProgram(m tea.Model, options ...tea.ProgramOption) *tea.Program {
+	options = append([]tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion()}, options...)
+	return tea.NewProgram(m, options...)
 }
