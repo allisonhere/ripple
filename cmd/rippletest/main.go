@@ -4,6 +4,8 @@
 // line, renders a mode-aware cursor (block in Normal/Visual, bar in Insert), and
 // reports the Submit/Cancel intents that ":w"/":q"/double-Esc emit.
 //
+// F4 switches visual wrapping. Use --wrap-demo for editable sample content.
+//
 // F5 toggles host mouse handling (initially off). Use --mouse-demo for editable
 // sample content.
 //
@@ -78,7 +80,23 @@ var (
 	commandStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 )
 
+// wrapDemo is initial document content, never a render-time replacement.
+const wrapDemo = `Word-aware wrapping keeps ordinary prose together at whitespace boundaries. Resize the terminal and press F4 to compare it with character wrapping while editing this paragraph.
+
+Long unbroken text falls back to character boundaries:
+Supercalifragilisticexpialidocious0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+https://example.org/a/very/long/unbroken/path/with_no_spaces_in_it
+
+Punctuation: hello, world! (Keep this together?) Multiple   spaces    remain.
+An explicit newline follows this sentence.
+    Leading spaces and trailing spaces are preserved.` + "   " + `
+
+Unicode: café naïve résumé — Ελληνικά привет. Wide characters: 日本語 中文 界界. Emoji: 🙂 🚀.
+
+Everything here is editable. F4 changes only the visual layout; F2 still toggles Vim mode and Ctrl+Q quits.`
+
 type model struct {
+	wrapMode                   ripple.WrapMode
 	mouseEnabled               bool
 	dragging                   bool
 	scrollDir                  int
@@ -128,6 +146,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyCtrlQ:
 			return m, tea.Quit
+		case tea.KeyF4:
+			if m.wrapMode == ripple.WrapWord {
+				m.wrapMode = ripple.WrapCharacter
+			} else {
+				m.wrapMode = ripple.WrapWord
+			}
+			m.ed.SetWrapMode(m.wrapMode)
+			return m, nil
 		case tea.KeyF2:
 			if m.ed.InputMode() == ripple.ModeVim {
 				m.ed.SetInputMode(ripple.ModePlain)
@@ -179,6 +205,11 @@ func (m model) View() string {
 	if mode != "" {
 		header = "-- " + mode + " --"
 	}
+	wrap := "character"
+	if m.wrapMode == ripple.WrapWord {
+		wrap = "word-aware"
+	}
+	header += " · wrap: " + wrap + " (F4)"
 	head := modeStyle.Render(header)
 	if cl := m.ed.CommandLine(); cl != "" {
 		head += "   " + commandStyle.Render(cl)
@@ -207,10 +238,15 @@ func (m model) View() string {
 
 func main() {
 	demo := flag.Bool("mouse-demo", false, "load an editable document for mouse interaction testing")
+	wrap := flag.Bool("wrap-demo", false, "start with editable wrapping demonstration text")
 	flag.Parse()
 	m := newModel()
-	if *demo {
+	switch {
+	case *demo:
 		m.ed.SetValue(mouseDemo())
+		m.ed, _ = m.ed.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	case *wrap:
+		m.ed.SetValue(wrapDemo)
 		m.ed, _ = m.ed.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
 	}
 	// Cell motion reports button drags without idle pointer-motion traffic.

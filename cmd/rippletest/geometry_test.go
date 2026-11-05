@@ -45,7 +45,7 @@ func frameOrigin(t *testing.T, output string, terminalHeight, initialRow int) in
 	t.Helper()
 	row, marker := initialRow, -1
 	for i := 0; i < len(output); {
-		if strings.HasPrefix(output[i:], "plain\r") || strings.HasPrefix(output[i:], "plain\n") || strings.HasPrefix(output[i:], "plain\x1b") {
+		if strings.HasPrefix(output[i:], "plain\r") || strings.HasPrefix(output[i:], "plain\n") || strings.HasPrefix(output[i:], "plain\x1b") || strings.HasPrefix(output[i:], "plain · wrap:") {
 			marker = row
 		}
 		switch output[i] {

@@ -36,6 +36,10 @@
 // disagree on wide runes and overflow. Clip/pad to the configured width
 // instead.
 //
+// Character wrapping is the default. Opt in to whitespace-aware visual wrapping
+// with [Model.SetWrapMode] and [WrapWord]; [WrapCharacter] restores the default.
+// Neither mode changes document text or undo history.
+//
 // # Host mouse support
 //
 // Hosts can translate mouse coordinates into [Model.PlaceCursor],

@@ -94,6 +94,16 @@ type Options struct {
 	Style func(key string, text string) string
 }
 
+// WrapMode controls visual wrapping without changing document text.
+type WrapMode int
+
+const (
+	// WrapCharacter wraps at the available cell width (the default).
+	WrapCharacter WrapMode = iota
+	// WrapWord prefers whitespace boundaries, falling back to character wrapping.
+	WrapWord
+)
+
 // Model is a multi-line text editor: create one with New, drive it with Update,
 // and render it with View. The zero value is usable (it falls back to the
 // default key bindings) but has no clipboard wired; prefer New.
@@ -104,6 +114,7 @@ type Model struct {
 	width     int
 	height    int
 	viewport  int
+	wrapMode  WrapMode
 	goalCol   int
 
 	viewportDetached bool // Explicit mouse viewport survives View until caret-following resumes.
@@ -272,8 +283,28 @@ func (m *Model) SetSize(width, height int) {
 	if height < 1 {
 		height = 1
 	}
+	if m.wrapMode == WrapWord && m.width != width {
+		// A preferred column from the old wrapping no longer describes this row.
+		m.goalCol = -1
+	}
 	m.width = width
 	m.height = height
+	m.ensureCursorVisible()
+}
+
+// SetWrapMode changes visual wrapping, preserving text, caret, selection,
+// and undo/redo history. The default is WrapCharacter; unknown modes also select
+// character wrapping. Reflow keeps the caret visible in the current viewport.
+func (m *Model) SetWrapMode(mode WrapMode) {
+	if mode != WrapWord {
+		mode = WrapCharacter
+	}
+	if m.wrapMode == mode {
+		return
+	}
+	m.wrapMode = mode
+	m.clamp()
+	m.goalCol = -1
 	m.ensureCursorVisible()
 }
 
@@ -652,7 +683,12 @@ func (m Model) renderVisualLine(vl visualLine, cursor string, selected, cursorRu
 // focused — mirroring the editor's block-cursor model.
 func (m Model) renderPlaceholder(cursor string, style func(string) string) string {
 	ph := []rune(m.placeholder)
-	lines := appendWrapped(nil, ph, 0, len(ph), max(1, m.width))
+	var lines []visualLine
+	if m.wrapMode == WrapWord {
+		lines = m.wrapLines(ph)
+	} else {
+		lines = appendWrapped(nil, ph, 0, len(ph), max(1, m.width), m.wrapMode)
+	}
 	out := make([]string, 0, m.height)
 	for row := 0; row < m.height; row++ {
 		if row >= len(lines) {
@@ -884,20 +920,28 @@ type visualLine struct {
 }
 
 func (m Model) visualLines() []visualLine {
+	return m.wrapLines(m.text)
+}
+
+func (m Model) wrapLines(text []rune) []visualLine {
 	width := max(1, m.width)
 	var lines []visualLine
 	lineStart := 0
-	for i, r := range m.text {
+	for i, r := range text {
 		if r == '\n' {
-			lines = appendWrapped(lines, m.text, lineStart, i, width)
+			lines = appendWrapped(lines, text, lineStart, i, width, m.wrapMode)
 			lineStart = i + 1
 		}
 	}
-	lines = appendWrapped(lines, m.text, lineStart, len(m.text), width)
+	lines = appendWrapped(lines, text, lineStart, len(text), width, m.wrapMode)
 	return lines
 }
 
-func appendWrapped(lines []visualLine, text []rune, start, end, width int) []visualLine {
+func appendWrapped(lines []visualLine, text []rune, start, end, width int, mode WrapMode) []visualLine {
+	if mode == WrapWord {
+		return appendWordWrapped(lines, text, start, end, width)
+	}
+
 	if start == end {
 		return append(lines, visualLine{start: start, end: end})
 	}
@@ -915,6 +959,37 @@ func appendWrapped(lines []visualLine, text []rune, start, end, width int) []vis
 	lines = append(lines, visualLine{start: lineStart, end: end})
 	if lineWidth == width {
 		lines = append(lines, visualLine{start: end, end: end})
+	}
+	return lines
+}
+
+// Keep whitespace in the buffer and on visual rows: wrapping never edits text.
+func appendWordWrapped(lines []visualLine, text []rune, start, end, width int) []visualLine {
+	if start == end {
+		return append(lines, visualLine{start, end})
+	}
+	for start < end {
+		i, cells, boundary := start, 0, start
+		for i < end {
+			rw := runeCellWidth(text[i])
+			if cells > 0 && cells+rw > width {
+				break
+			}
+			cells += rw
+			i++
+			if unicode.IsSpace(text[i-1]) {
+				boundary = i
+			}
+		}
+		stop := i
+		if i < end && boundary > start {
+			stop = boundary
+		}
+		lines = append(lines, visualLine{start, stop})
+		start = stop
+		if start == end && cells == width {
+			lines = append(lines, visualLine{end, end})
+		}
 	}
 	return lines
 }
@@ -955,7 +1030,15 @@ func (m Model) indexAtVisual(row, col int) int {
 	if len(lines) == 0 {
 		return 0
 	}
-	return m.indexAtLine(lines[row], col)
+	line := lines[row]
+	idx := m.indexAtLine(line, col)
+	// A soft boundary belongs to the next visual row. Word wrapping makes
+	// short rows common: retain the requested target row when its end is
+	// before the preferred column, rather than skipping into the next row.
+	if m.wrapMode == WrapWord && idx == line.end && line.end > line.start && row+1 < len(lines) && lines[row+1].start == line.end {
+		return line.end - 1
+	}
+	return idx
 }
 
 func (m Model) indexAtLine(line visualLine, col int) int {
