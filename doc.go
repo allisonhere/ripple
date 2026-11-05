@@ -40,6 +40,15 @@
 // with [Model.SetWrapMode] and [WrapWord]; [WrapCharacter] restores the default.
 // Neither mode changes document text or undo history.
 //
+// # Host mouse support
+//
+// Hosts can translate mouse coordinates into [Model.PlaceCursor],
+// [Model.ExtendSelectionTo], and [Model.SelectWordAt], using zero-based viewport
+// rows and terminal-cell columns. [Model.ScrollRows] scrolls independently of
+// the caret; explicit scrolling survives View until keyboard activity or resizing
+// restores caret visibility. Gesture recognition and autoscroll timers belong
+// to the host; Ripple itself does not consume mouse events.
+//
 // # Keys
 //
 // Editing commands (undo/redo, select-all, copy/cut/paste) are configurable via

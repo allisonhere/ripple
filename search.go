@@ -99,6 +99,9 @@ func (m *Model) OpenSearch() { m.openSearch(false, 0) }
 func (m *Model) OpenReplace() { m.openSearch(true, 0) }
 
 func (m *Model) openSearch(replacing bool, vimDirection int) {
+	if m.viewportDetached {
+		m.ensureCursorVisible()
+	}
 	s := &m.search
 	if !s.active {
 		q, r := s.query.Value(), s.replacement.Value()
@@ -132,6 +135,9 @@ func (m *Model) openSearch(replacing bool, vimDirection int) {
 	m.focusSearchField()
 	m.refreshSearch()
 	m.previewSearch()
+	// Opening an internal bar reduces the visible document height. Keep the
+	// stored viewport identical to View before a host maps pointer coordinates.
+	m.ensureCursorVisible()
 }
 
 // CloseSearch restores the full editor viewport without undoing replacements.

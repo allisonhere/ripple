@@ -3,6 +3,7 @@ package ripple
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -117,6 +118,19 @@ func (m Model) CommandLine() string {
 // sub-mode. Insert mode delegates to the plain key path (plus Esc); the others
 // have dedicated handlers.
 func (m Model) handleVim(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Mouse APIs leave an ordinary exclusive selection in Normal mode. Honour
+	// the configured copy/cut commands for that range without changing native
+	// Visual-mode operators or any unselected Normal-mode key behavior.
+	if m.vim.mode == vimNormal && m.selAnchor >= 0 {
+		km := m.keys
+		if len(km.Undo.Keys()) == 0 {
+			km = DefaultKeyMap()
+		}
+		if key.Matches(msg, km.Copy, km.Cut) {
+			return m.handlePlainKey(msg)
+		}
+	}
+
 	switch m.vim.mode {
 	case vimInsert:
 		return m.vimInsertKey(msg)

@@ -117,6 +117,8 @@ type Model struct {
 	wrapMode  WrapMode
 	goalCol   int
 
+	viewportDetached bool // Explicit mouse viewport survives View until caret-following resumes.
+
 	undo         []snapshot
 	redo         []snapshot
 	coalesceKind editKind
@@ -401,6 +403,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.viewportDetached {
+		m.ensureCursorVisible()
+	}
 	if m.SearchActive() {
 		return m.searchKey(msg)
 	}
@@ -563,7 +568,9 @@ func (m Model) View(opts Options) string {
 	totalHeight := m.height
 	bars := m.searchBarIfActive(m.width, opts)
 	opts = m.searchRenderOptions(opts)
-	m.ensureCursorVisible()
+	if !m.viewportDetached {
+		m.ensureCursorVisible()
+	}
 	m.height = m.documentHeight()
 	if m.height <= 0 {
 		return strings.Join(bars, "\n")
@@ -885,6 +892,7 @@ func (m *Model) clamp() {
 }
 
 func (m *Model) ensureCursorVisible() {
+	m.viewportDetached = false
 	row, _ := m.visualPosition(m.cursor)
 	if row < m.viewport {
 		m.viewport = row
@@ -1023,6 +1031,17 @@ func (m Model) indexAtVisual(row, col int) int {
 		return 0
 	}
 	line := lines[row]
+	idx := m.indexAtLine(line, col)
+	// A soft boundary belongs to the next visual row. Word wrapping makes
+	// short rows common: retain the requested target row when its end is
+	// before the preferred column, rather than skipping into the next row.
+	if m.wrapMode == WrapWord && idx == line.end && line.end > line.start && row+1 < len(lines) && lines[row+1].start == line.end {
+		return line.end - 1
+	}
+	return idx
+}
+
+func (m Model) indexAtLine(line visualLine, col int) int {
 	if col < 0 {
 		col = 0
 	}
@@ -1033,12 +1052,6 @@ func (m Model) indexAtVisual(row, col int) int {
 			return i
 		}
 		used = next
-	}
-	// A soft boundary belongs to the next visual row. Word wrapping makes
-	// short rows common: retain the requested target row when its end is
-	// before the preferred column, rather than skipping into the next row.
-	if m.wrapMode == WrapWord && line.end > line.start && row+1 < len(lines) && lines[row+1].start == line.end {
-		return line.end - 1
 	}
 	return line.end
 }
