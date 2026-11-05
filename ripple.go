@@ -106,6 +106,8 @@ type Model struct {
 	viewport  int
 	goalCol   int
 
+	viewportDetached bool // Explicit mouse viewport survives View until caret-following resumes.
+
 	undo         []snapshot
 	redo         []snapshot
 	coalesceKind editKind
@@ -370,6 +372,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if m.viewportDetached {
+		m.ensureCursorVisible()
+	}
 	if m.SearchActive() {
 		return m.searchKey(msg)
 	}
@@ -532,7 +537,9 @@ func (m Model) View(opts Options) string {
 	totalHeight := m.height
 	bars := m.searchBarIfActive(m.width, opts)
 	opts = m.searchRenderOptions(opts)
-	m.ensureCursorVisible()
+	if !m.viewportDetached {
+		m.ensureCursorVisible()
+	}
 	m.height = m.documentHeight()
 	if m.height <= 0 {
 		return strings.Join(bars, "\n")
@@ -849,6 +856,7 @@ func (m *Model) clamp() {
 }
 
 func (m *Model) ensureCursorVisible() {
+	m.viewportDetached = false
 	row, _ := m.visualPosition(m.cursor)
 	if row < m.viewport {
 		m.viewport = row
@@ -947,7 +955,10 @@ func (m Model) indexAtVisual(row, col int) int {
 	if len(lines) == 0 {
 		return 0
 	}
-	line := lines[row]
+	return m.indexAtLine(lines[row], col)
+}
+
+func (m Model) indexAtLine(line visualLine, col int) int {
 	if col < 0 {
 		col = 0
 	}

@@ -134,7 +134,7 @@ place (a block cursor that still shows its glyph) for Normal/Visual mode, while
 Insert can keep a bar via `Options.Cursor`.
 
 A runnable harness lives in `cmd/rippletest` (`go run ./cmd/rippletest`; `F2`
-toggles vim, `Ctrl+Q` quits).
+toggles vim, `F5` toggles mouse handling, `Ctrl+Q` quits).
 
 ## Syntax highlighting
 
@@ -256,6 +256,77 @@ styling hooks. Syntax styling runs first, search highlighting second, and
 selection/cursor last. Defaults underline matches and reverse the current hit
 and focused control. The terminal harness enables the advanced regex toggle for
 interactive testing (`go run ./cmd/rippletest`).
+
+## Mouse interaction APIs
+
+Ripple supplies editing operations; the host recognizes clicks, drags,
+double-clicks, wheel events, and autoscroll gestures. The library does not
+consume mouse events or start timers, and has no mouse-enabled setting.
+
+```go
+ed.PlaceCursor(row, col)       // Move the caret and clear selection.
+ed.ExtendSelectionTo(row, col) // Keep the anchor and extend a drag selection.
+ed.SelectWordAt(row, col)      // Select the word under a double-click.
+ed.ScrollRows(3)               // Scroll down three visual rows; negative goes up.
+```
+
+Coordinates are zero-based **visible document rows** and **terminal-cell
+columns**, relative to the editor content area. The host subtracts its header,
+border, and padding offsets. Wrapped visual rows and the current viewport are
+accounted for; wide Unicode characters occupy their existing terminal-cell
+widths. Coordinates clamp safely to the visible document area and line ends.
+Blank screen rows below the document map to its end. Built-in Find/Replace rows
+are excluded; coordinate operations do nothing if no document rows are visible.
+At a soft wrap, the shared buffer offset belongs to the next visual row.
+
+`PlaceCursor` follows normal caret-movement semantics and keeps the caret
+visible. `ExtendSelectionTo` retains its original anchor, including when dragging
+backward or reversing direction; a new `PlaceCursor` starts a fresh gesture.
+`SelectWordAt` selects Unicode letters, digits, and underscores across soft
+wraps. Punctuation selects one rune; whitespace, empty rows, and cells past a
+visual line clear selection rather than selecting an adjacent word.
+
+`ScrollRows` leaves text, caret, selection, and undo/redo history intact. `View`
+honours the explicit viewport even with an off-screen caret. Selection extension
+and word selection preserve that viewport too. Keyboard editing/navigation and
+resizing restore caret visibility. Selection content is the original document
+substring, including spaces and explicit newlines; soft wraps never enter copied
+text. Pointer operations add no undo steps, while caret movement ends a typing
+group as keyboard movement does.
+
+Pointer selections use ordinary exclusive endpoints. In Vim mode they end Visual,
+Visual-line, command input, and pending operators while retaining Insert mode if
+already active. Normal mode accepts the configured copy/cut bindings for these
+selections; native Vim Visual-mode operators remain unchanged.
+
+### Interactive mouse testing
+
+Run `go run ./cmd/rippletest --mouse-demo` for an editable document with long and
+short lines, paragraphs, blank lines, whitespace, punctuation, and Unicode. Without
+the flag, the harness starts empty as before. **F5** switches mouse handling
+**ON/OFF**, initially **OFF**, without changing the document or selection.
+Diagnostics show mouse state, cursor rune offset, selection length in runes, and
+viewport top visual row. **F2** still toggles Vim mode and **Ctrl+Q** quits.
+
+With mouse handling on, click to place the caret, drag to select, double-click a
+word, and wheel to scroll three visual rows per event. Clicks outside the editor
+are ignored. Double-clicks require the same terminal cell and document position
+within 400 ms. Hold a drag above or below the editing area to scroll and extend
+the selection one row every 75 ms; horizontal overflow clamps to the visible edge.
+Moving back inside, releasing the button, keyboard input, resizing, or disabling
+mouse handling cancels autoscrolling. Stale ticks cannot revive a stopped gesture.
+Double-click-and-drag word selection and triple-click paragraph selection are
+not implemented. Find/Replace remains keyboard-operated; the harness ignores
+mouse events while its bar is open. Clipboard shortcuts use the existing OS
+clipboard integration, and demo edits support the existing undo/redo commands.
+
+The harness uses the terminal's alternate screen, anchoring the header and editor
+independently of the shell cursor position and restoring the shell screen on exit.
+This keeps absolute terminal mouse coordinates aligned with the rendered editor.
+It enables Bubble Tea button-motion reporting for its lifetime; F5 gates
+handling rather than terminal reporting. No idle pointer-motion loop is requested,
+and only active out-of-bounds drags schedule autoscroll ticks. Resize the terminal
+to test layout and coordinate translation in your terminal emulator.
 
 ## License
 
